@@ -1,9 +1,10 @@
 'use client';
 
 import { useAtom } from 'jotai';
-import { Cpu, Zap, MessageSquarePlus } from 'lucide-react';
-import { engineModeAtom, selectedOllamaModelAtom } from '@/lib/atoms';
+import { Cpu, Zap, MessageSquarePlus, Volume2, VolumeX } from 'lucide-react';
+import { engineModeAtom, selectedOllamaModelAtom, ttsEnabledAtom } from '@/lib/atoms';
 import { Button } from '@/components/ui/button';
+import { stopTTS } from '@/lib/tts';
 import {
   Select,
   SelectContent,
@@ -23,6 +24,14 @@ export function VoiceAgentHeader({
 }: VoiceAgentHeaderProps) {
   const [engineMode, setEngineMode] = useAtom(engineModeAtom);
   const [selectedOllamaModel, setSelectedOllamaModel] = useAtom(selectedOllamaModelAtom);
+  const [ttsEnabled, setTtsEnabled] = useAtom(ttsEnabledAtom);
+
+  const toggleTts = () => {
+    if (ttsEnabled) {
+      stopTTS();
+    }
+    setTtsEnabled(!ttsEnabled);
+  };
 
   return (
     <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-border bg-card text-card-foreground flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
@@ -95,13 +104,35 @@ export function VoiceAgentHeader({
           </div>
         )}
 
+        {/* TTS Voice Auto-play Toggle */}
+        <Button
+          size="xs"
+          variant={ttsEnabled ? 'default' : 'outline'}
+          onClick={toggleTts}
+          className="h-7 px-2.5 gap-1.5 text-xs shrink-0"
+          title={ttsEnabled ? 'TTS Voice Output is Enabled (Click to Mute)' : 'TTS Voice Output is Muted (Click to Enable)'}
+        >
+          {ttsEnabled ? (
+            <>
+              <Volume2 className="w-3.5 h-3.5 text-primary-foreground animate-pulse" />
+              <span className="hidden sm:inline">Voice ON</span>
+            </>
+          ) : (
+            <>
+              <VolumeX className="w-3.5 h-3.5 text-muted-foreground" />
+              <span className="hidden sm:inline text-muted-foreground">Voice OFF</span>
+            </>
+          )}
+        </Button>
+
+        {/* Clear History Button */}
         <div className="flex items-center gap-1.5 shrink-0">
           <Button
             size="icon"
-            variant="outline"
+            variant="ghost"
             onClick={clearChatHistory}
-            title="New Chat Session"
-            className="h-7 w-7 sm:h-8 sm:w-8"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            title="Clear Chat History"
           >
             <MessageSquarePlus className="w-4 h-4" />
           </Button>

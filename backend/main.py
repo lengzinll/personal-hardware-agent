@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from database import init_db
-from routers import led, system, agent, websocket
+from routers import led, system, agent, websocket, tts
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -40,6 +40,7 @@ app.include_router(led.router)
 app.include_router(system.router)
 app.include_router(agent.router)
 app.include_router(websocket.router)
+app.include_router(tts.router)
 
 @app.get("/")
 def root():
