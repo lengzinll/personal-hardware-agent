@@ -11,7 +11,7 @@ async def websocket_led_status(websocket: WebSocket):
     """
     WebSocket endpoint for real-time LED status updates and command control.
     Clients connect here to:
-    - Receive live LED state changes
+    - Receive live LED state changes and hardware health
     - Send LED & Lamp control commands
     """
     await led_state_manager.connect(websocket)
@@ -23,48 +23,31 @@ async def websocket_led_status(websocket: WebSocket):
             
             try:
                 message = json.loads(data)
-                message_type = message.get("type")
+                cmd_type = message.get("type") or message.get("action")
+                # Support both 'action' and 'state' parameter names
+                target_state = message.get("state") or (message.get("action") if message.get("action") in ("ON", "OFF", "TOGGLE") else None) or "TOGGLE"
                 
-                if message_type == "control_lamp":
-                    action = message.get("action", "TOGGLE")
-                    result = control_lamp(action=action)
-                    await websocket.send_text(json.dumps({
-                        "type": "command_response",
-                        "success": result.get("success", False),
-                        "message": result.get("speechText", ""),
-                        "states": result.get("states", {}),
-                    }))
-
-                elif message_type == "control_led":
-                    # Handle LED / Lamp control command
+                result = None
+                
+                if cmd_type == "control_lamp":
+                    result = control_lamp(action=target_state)
+                elif cmd_type == "control_led":
                     color = message.get("color", "all")
-                    action = message.get("action", "TOGGLE")
-                    
                     if color == "lamp":
-                        result = control_lamp(action=action)
+                        result = control_lamp(action=target_state)
                     else:
-                        result = control_leds(color=color, action=action)  # type: ignore
-                    
-                    # Send back confirmation
-                    await websocket.send_text(json.dumps({
-                        "type": "command_response",
-                        "success": result.get("success", False),
-                        "message": result.get("speechText", ""),
-                        "states": result.get("states", {}),
-                    }))
-                
-                elif message_type == "set_traffic_preset":
-                    # Handle traffic preset command
+                        result = control_leds(color=color, action=target_state)  # type: ignore
+                elif cmd_type in ("traffic_preset", "set_traffic_preset"):
                     mode = message.get("mode", "off")
-                    
                     result = set_traffic_preset(mode)  # type: ignore
-                    
-                    # Send back confirmation
+                
+                if result:
                     await websocket.send_text(json.dumps({
                         "type": "command_response",
                         "success": result.get("success", False),
                         "message": result.get("speechText", ""),
                         "states": result.get("states", {}),
+                        "payload": result,
                     }))
             
             except json.JSONDecodeError:
