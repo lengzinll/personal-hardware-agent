@@ -44,12 +44,30 @@ def set_led(body: Optional[LedActionRequest] = None):
 
     return control_leds(color=color, action=action)
 
-# --- Direct Convenience Endpoints ---
+# --- Direct Convenience Endpoints for Lamp & Presets ---
+
+@router.get("/lamp/toggle")
+@router.post("/lamp/toggle")
+def toggle_lamp_endpoint():
+    """Toggle the lamp relay state (ON <-> OFF)."""
+    return control_lamp(action="TOGGLE")
+
+@router.get("/lamp/on")
+@router.post("/lamp/on")
+def lamp_on_endpoint():
+    """Turn the lamp relay ON."""
+    return control_lamp(action="ON")
+
+@router.get("/lamp/off")
+@router.post("/lamp/off")
+def lamp_off_endpoint():
+    """Turn the lamp relay OFF."""
+    return control_lamp(action="OFF")
 
 @router.get("/lamp")
 @router.post("/lamp")
 def lamp_endpoint(action: Optional[Literal["ON", "OFF", "TOGGLE"]] = "TOGGLE"):
-    """Control the lamp relay (GPIO 17)."""
+    """Control the lamp relay with a specified action."""
     return control_lamp(action=action)
 
 @router.get("/red")
