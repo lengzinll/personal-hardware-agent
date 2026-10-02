@@ -1,34 +1,58 @@
-import time
 import json
-import urllib.request
+import os
+import time
 import urllib.error
+import urllib.request
 import cv2
 from ultralytics import YOLO
 
 # ==========================================
 # 1. CONFIGURATION
 # ==========================================
-TRIGGER_DURATION = 30.0  # 30 seconds timer
+TRIGGER_DURATION = 5.0  # Time required in seconds (10s)
 GRACE_TOLERANCE = 1.5   # 1.5s tolerance to handle occasional missed frames/flicker
-
-SERVER_HOST = "192.168.39.227:8000"
-LAMP_ON_URL = f"http://{SERVER_HOST}/api/led/lamp/on"
-LAMP_OFF_URL = f"http://{SERVER_HOST}/api/led/lamp/off"
-STATUS_URL = f"http://{SERVER_HOST}/api/led/lamp/auto"
+SERVER_HOST = os.getenv("SERVER_HOST", "192.168.39.227:8000")
 
 # Load pretrained YOLO model
-model = YOLO("yolo11n.pt")
+model = YOLO("yolo11m.pt")
 
 # Camera RTSP URL
 rtsp_url = "rtsp://admin:Admin123456@192.168.39.128:554"
 
+# Open RTSP stream
+cap = cv2.VideoCapture(rtsp_url)
 
-def send_lamp_command(action: str):
-    """Sends HTTP request to turn the lamp ON or OFF."""
-    target_url = LAMP_ON_URL if action.upper() == "ON" else LAMP_OFF_URL
+if not cap.isOpened():
+    print("❌ Error: Cannot connect to RTSP camera at", rtsp_url)
+    exit(1)
+
+print("=" * 65)
+print("  🎥 YOLO PERSON PRESENCE & ABSENCE MONITOR (10s TIMER)")
+print("=" * 65)
+print(f"• Presence Trigger : Log after {TRIGGER_DURATION:.0f}s of continuous person detection")
+print(f"• Absence Trigger  : Log after {TRIGGER_DURATION:.0f}s of continuous no-person")
+print("• Press 'Q' in the video window to quit")
+print("=" * 65)
+print("\nMonitoring video feed...\n")
+
+# State tracking variables
+person_first_seen = None
+person_last_seen = None
+no_person_first_seen = time.time()
+
+person_alert_logged = False
+no_person_alert_logged = False
+
+
+def request_lamp_action(action: str = "TOGGLE"):
+    """
+    Sends an HTTP POST to control the lamp.
+    :param action: "ON", "OFF", or "TOGGLE"
+    """
+    action_url = f"http://{SERVER_HOST}/api/led/lamp/{action.lower()}"
     try:
         req = urllib.request.Request(
-            target_url,
+            action_url,
             data=b"{}",
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -36,57 +60,18 @@ def send_lamp_command(action: str):
         with urllib.request.urlopen(req, timeout=1.5) as response:
             if response.status == 200:
                 res_data = json.loads(response.read().decode("utf-8"))
-                if res_data.get("allowed", True):
-                    new_state = res_data.get("state", action.upper())
-                    msg = res_data.get("speechText", f"Lamp is now {new_state}")
-                    print(f"💡 [HTTP Backend Response] {msg} (WebSocket Synced to UI)")
-                else:
-                    print(f"🔒 [Auto Mode OFF] Backend skipped automatic lamp {action.upper()}: {res_data.get('message')}")
+                new_state = res_data.get("state", action.upper())
+                msg = res_data.get("speechText", f"Lamp is now {new_state}")
+                print(f"💡 [HTTP Backend Synced] {msg} (WebSocket broadcasted to UI)")
+                return new_state
+            else:
+                print(f"⚠️ [Backend Error] Status {response.status}")
     except urllib.error.URLError as err:
-        print(f"❌ [Backend Offline] Could not reach {target_url} ({err.reason}).")
+        print(f"❌ [Backend Offline] Could not reach {action_url} ({err.reason}).")
     except Exception as e:
         print(f"❌ [Request Failed] {e}")
+    return None
 
-
-def check_auto_mode():
-    """Check if Auto Mode is enabled on the backend."""
-    try:
-        req = urllib.request.Request(STATUS_URL, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=1.0) as response:
-            if response.status == 200:
-                data = json.loads(response.read().decode("utf-8"))
-                return data.get("auto_mode", False)
-    except Exception:
-        pass
-    return False
-
-
-# Open RTSP stream
-cap = cv2.VideoCapture(rtsp_url)
-
-if not cap.isOpened():
-    print(f"❌ Error: Cannot connect to RTSP camera at {rtsp_url}")
-    exit(1)
-
-is_auto_on = check_auto_mode()
-
-print("=" * 68)
-print("  🎥 YOLO PERSON PRESENCE & ABSENCE MONITOR (30s AUTO-LAMP)")
-print("=" * 68)
-print(f"• Backend Target   : {SERVER_HOST}")
-print(f"• Lamp Auto Mode   : {'ENABLED (Will trigger lamp)' if is_auto_on else 'DISABLED (Only AI/Manual allowed)'}")
-print(f"• Presence Trigger : Turn ON after {TRIGGER_DURATION:.0f}s of continuous person presence")
-print(f"• Absence Trigger  : Turn OFF after {TRIGGER_DURATION:.0f}s of continuous absence")
-print("• Press 'Q' in the video window to quit")
-print("=" * 68)
-print("\nMonitoring video feed...\n")
-
-person_first_seen = None
-person_last_seen = None
-no_person_first_seen = time.time()
-
-person_alert_logged = False
-no_person_alert_logged = False
 
 try:
     while True:
@@ -102,7 +87,7 @@ try:
         # Run YOLO detection for class 0 (person)
         results = model.predict(
             source=frame,
-            conf=0.45,
+            conf=0.8,
             classes=[0],  # 0 is 'person' in COCO
             imgsz=640,
             verbose=False,
@@ -126,14 +111,14 @@ try:
 
             person_duration = now - person_first_seen
 
-            # Trigger presence after 30 seconds
+            # Trigger presence log and lamp action when 10 seconds threshold is reached
             if person_duration >= TRIGGER_DURATION and not person_alert_logged:
-                print(f"\n👤 [LOG] Person detected continuously for {person_duration:.1f}s!")
-                send_lamp_command("ON")
+                print(f"👤 [LOG] Person detected! (Present for {person_duration:.1f}s)")
                 person_alert_logged = True
+                request_lamp_action("ON")
 
         else:
-            # Check if within grace tolerance before dropping presence
+            # Check if within grace period before dropping person presence
             if person_last_seen is not None and (now - person_last_seen) < GRACE_TOLERANCE:
                 person_duration = now - person_first_seen if person_first_seen else 0.0
             else:
@@ -145,11 +130,11 @@ try:
 
                 no_person_duration = now - no_person_first_seen
 
-                # Trigger absence after 30 seconds
+                # Trigger absence log and lamp action when 10 seconds threshold is reached
                 if no_person_duration >= TRIGGER_DURATION and not no_person_alert_logged:
-                    print(f"\n🚫 [LOG] No more person (Absent for {no_person_duration:.1f}s)!")
-                    send_lamp_command("OFF")
+                    print(f"🚫 [LOG] No more person (Absent for {no_person_duration:.1f}s)")
                     no_person_alert_logged = True
+                    request_lamp_action("OFF")
 
         # ==========================================
         # 3. VISUAL HUD ON VIDEO FEED
@@ -165,7 +150,8 @@ try:
             hud_text = f"No Person: {dur:.1f}s / {TRIGGER_DURATION:.0f}s"
             color = (0, 0, 255) if dur >= TRIGGER_DURATION else (180, 180, 180)
 
-        cv2.rectangle(annotated_frame, (10, 10), (380, 45), (0, 0, 0), -1)
+        # Draw HUD badge
+        cv2.rectangle(annotated_frame, (10, 10), (360, 45), (0, 0, 0), -1)
         cv2.putText(
             annotated_frame,
             hud_text,
@@ -184,4 +170,5 @@ try:
 finally:
     cap.release()
     cv2.destroyAllWindows()
+    request_lamp_action("OFF")
     print("\n👋 Stopped YOLO detector.")

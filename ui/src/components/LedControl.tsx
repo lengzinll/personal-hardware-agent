@@ -130,7 +130,7 @@ export function LedControl({ onStateChange }: LedControlProps) {
       {isGreenOn && <div className="absolute left-2/4 -top-12 w-48 h-48 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />}
       {isLampOn && <div className="absolute -right-12 -top-12 w-48 h-48 bg-sky-400/20 rounded-full blur-3xl pointer-events-none" />}
 
-      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 gap-2">
+      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 text-primary">
             <Lightbulb className="w-5 h-5" />

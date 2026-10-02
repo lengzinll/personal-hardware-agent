@@ -10,7 +10,6 @@ import { ChatInputDock } from './agent/ChatInputDock';
 import {
   engineModeAtom,
   selectedOllamaModelAtom,
-  apiKeyAtom,
   ttsEnabledAtom,
   ttsSpeakingIdAtom,
 } from '@/lib/atoms';
@@ -24,7 +23,6 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
   // Global Jotai Atoms
   const engineMode = useAtomValue(engineModeAtom);
   const [selectedOllamaModel, setSelectedOllamaModel] = useAtom(selectedOllamaModelAtom);
-  const apiKey = useAtomValue(apiKeyAtom);
   const ttsEnabled = useAtomValue(ttsEnabledAtom);
   const [, setSpeakingId] = useAtom(ttsSpeakingIdAtom);
 
@@ -110,7 +108,6 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           command: userText,
-          apiKey: apiKey.trim(),
           engineMode,
           ollamaModel: selectedOllamaModel,
           history: historyPayload,
@@ -135,58 +132,46 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
 
         setMessages((prev) => [...prev, agentMsg]);
 
-        // Auto-play TTS if enabled
+        // Trigger TTS if enabled
         if (ttsEnabled && replyText) {
           setSpeakingId(agentMsgId);
-          playBackendTTS(
-            replyText,
-            'en-US-JennyNeural',
-            undefined,
-            () => setSpeakingId(null),
-            () => setSpeakingId(null)
-          );
+          playBackendTTS(replyText, 'en-US-JennyNeural', undefined, () => {
+            setSpeakingId(null);
+          });
         }
 
-        if (data.actionTaken && !['ollama_chat_response', 'chat_response', 'general_command_processed'].includes(data.actionTaken)) {
-          showSuccessToast('⚡ Action Executed', `Executed ${data.actionTaken} successfully.`);
+        if (data.actionTaken) {
+          showSuccessToast('Hardware Action Executed', replyText);
           if (onRefreshData) onRefreshData();
         }
       } else {
-        const errorMsgText = `⚠️ ${data.error || 'Failed to process command. Make sure Ollama is running or Gemini API Key is set.'}`;
-        const errorMsg: ChatMessage = {
+        const errMsg = data.error || data.message || 'Failed to process command';
+        const errorAgentMsg: ChatMessage = {
           id: agentMsgId,
           sender: 'agent',
-          text: errorMsgText,
+          text: `⚠️ **Error**: ${errMsg}`,
           modelUsed: modelDisplayName,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
-        setMessages((prev) => [...prev, errorMsg]);
-
-        if (ttsEnabled) {
-          setSpeakingId(agentMsgId);
-          playBackendTTS(
-            errorMsgText,
-            'en-US-JennyNeural',
-            undefined,
-            () => setSpeakingId(null),
-            () => setSpeakingId(null)
-          );
-        }
+        setMessages((prev) => [...prev, errorAgentMsg]);
+        toast.error('Command Execution Failed', { description: errMsg });
       }
-    } catch {
+    } catch (err: any) {
       const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         sender: 'agent',
-        text: '❌ Network error connecting to AURA agent API.',
+        text: `⚠️ **Connection Error**: ${err.message || 'Could not reach backend service'}`,
+        modelUsed: 'Network Error',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, errorMsg]);
+      toast.error('Failed to communicate with Agent Backend');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const copyMessageToClipboard = (id: string, text: string) => {
+  const handleCopyMessage = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     toast.success('Copied to clipboard');
@@ -200,34 +185,44 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
       {
         id: 'welcome_reset',
         sender: 'agent',
-        text: 'Chat history cleared. How can I assist you with LED control?',
+        text: "Chat cleared! How can I assist with your hardware today?",
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        modelUsed: 'AURA Agent',
+        modelUsed: 'AURA Agent Engine',
       },
     ]);
+    toast.info('Conversation history cleared');
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-160px)] min-h-[500px] max-h-[850px] rounded-2xl border border-border bg-card/60 backdrop-blur-sm overflow-hidden shadow-sm">
-      <VoiceAgentHeader
-        ollamaModels={ollamaModels}
-        clearChatHistory={handleClearHistory}
-      />
+    <div className="flex flex-col flex-1 h-full min-h-0 bg-card/60 backdrop-blur-md rounded-2xl border border-border overflow-hidden shadow-xs">
+      {/* Header */}
+      <div className="shrink-0">
+        <VoiceAgentHeader
+          ollamaModels={ollamaModels}
+          clearChatHistory={handleClearHistory}
+        />
+      </div>
 
-      <ChatMessageList
-        messages={messages}
-        isLoading={isLoading}
-        copiedId={copiedId}
-        copyToClipboard={(text, id) => copyMessageToClipboard(id, text)}
-        messagesEndRef={messagesEndRef}
-      />
+      {/* Message Stream with Scrollbar */}
+      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+        <ChatMessageList
+          messages={messages}
+          isLoading={isLoading}
+          copiedId={copiedId}
+          copyToClipboard={handleCopyMessage}
+          messagesEndRef={messagesEndRef}
+        />
+      </div>
 
-      <ChatInputDock
-        inputText={inputText}
-        setInputText={setInputText}
-        isLoading={isLoading}
-        handleSendMessage={() => handleSendMessage()}
-      />
+      {/* Input Dock */}
+      <div className="shrink-0">
+        <ChatInputDock
+          inputText={inputText}
+          setInputText={setInputText}
+          isLoading={isLoading}
+          handleSendMessage={() => handleSendMessage()}
+        />
+      </div>
     </div>
   );
 }

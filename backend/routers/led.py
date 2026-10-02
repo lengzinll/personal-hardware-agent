@@ -47,7 +47,7 @@ def set_led(body: Optional[LedActionRequest] = None):
     action = body.action if body and body.action else "TOGGLE"
     force = body.force if body and body.force is not None else False
     source = body.source if body and body.source else "manual"
-    
+
     if color == "lamp":
         return control_lamp(action=action, force=force, source=source)
 
