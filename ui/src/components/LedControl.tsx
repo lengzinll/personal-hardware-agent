@@ -1,0 +1,247 @@
+'use client';
+
+import { useState } from 'react';
+import { Lightbulb, Power, Radio } from 'lucide-react';
+import { useAtomValue } from 'jotai';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
+import { ledStatesAtom, ledWebSocketConnectedAtom } from '@/lib/atoms';
+import { useLedWebSocket } from '@/lib/useLedWebSocket';
+
+interface LedControlProps {
+  onStateChange?: () => void;
+}
+
+export function LedControl({ onStateChange }: LedControlProps) {
+  // Access LED state from Jotai global state
+  const ledStates = useAtomValue(ledStatesAtom);
+  const isConnected = useAtomValue(ledWebSocketConnectedAtom);
+
+  // Get WebSocket send methods
+  const { sendControlCommand, sendPresetCommand } = useLedWebSocket();
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleControl = async (color: 'red' | 'yellow' | 'green' | 'all', action: 'ON' | 'OFF' | 'TOGGLE') => {
+    if (!isConnected) {
+      toast.error('Not connected to LED service');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const success = await sendControlCommand(color, action);
+      if (success) {
+        toast.success(`${color} LED ${action}`);
+        if (onStateChange) onStateChange();
+      } else {
+        toast.error('Failed to send command');
+      }
+    } catch (err) {
+      toast.error('Failed to update LED hardware');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handlePreset = async (mode: 'red' | 'yellow' | 'green' | 'off' | 'all') => {
+    if (!isConnected) {
+      toast.error('Not connected to LED service');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const success = await sendPresetCommand(mode);
+      if (success) {
+        toast.success(`Preset: ${mode.toUpperCase()}`);
+        if (onStateChange) onStateChange();
+      } else {
+        toast.error('Failed to send preset');
+      }
+    } catch (err) {
+      toast.error('Failed to set preset');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const isRedOn = ledStates.red === 'ON';
+  const isYellowOn = ledStates.yellow === 'ON';
+  const isGreenOn = ledStates.green === 'ON';
+  const anyOn = isRedOn || isYellowOn || isGreenOn;
+
+  return (
+    <Card className="border-border bg-card/70 backdrop-blur-md overflow-hidden relative shadow-sm">
+      {/* Visual Ambient Glow based on active LEDs */}
+      {isRedOn && <div className="absolute -left-12 -top-12 w-48 h-48 bg-rose-500/15 rounded-full blur-3xl pointer-events-none" />}
+      {isYellowOn && <div className="absolute left-1/3 -top-12 w-48 h-48 bg-amber-400/15 rounded-full blur-3xl pointer-events-none" />}
+      {isGreenOn && <div className="absolute -right-12 -top-12 w-48 h-48 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />}
+
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 text-primary">
+            <Lightbulb className="w-5 h-5" />
+          </div>
+          <CardTitle className="text-sm sm:text-base font-semibold">Hardware Controller</CardTitle>
+        </div>
+      </CardHeader>
+
+      <CardContent className="pt-0 space-y-4">
+        {/* 3 Individual LED Controllers */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* RED LED (GPIO 27) */}
+          <div className={`p-3.5 rounded-xl border transition-all duration-200 ${isRedOn ? 'bg-rose-500/10 border-rose-500/40 shadow-xs' : 'bg-muted/40 border-border'}`}>
+            <div className="flex items-center justify-between mb-2.5">
+              <div className="flex items-center gap-2">
+                <span className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${isRedOn ? 'bg-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.9)] animate-pulse' : 'bg-rose-950/60 border border-rose-800/40'}`} />
+                <div>
+                  <h4 className="text-xs font-bold text-foreground">RED LED</h4>
+                  <span className="text-[10px] text-muted-foreground font-mono">GPIO 27</span>
+                </div>
+              </div>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${isRedOn ? 'bg-rose-500/20 text-rose-400 border-rose-500/30' : 'bg-muted text-muted-foreground border-border'}`}>
+                {ledStates.red}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant={isRedOn ? 'destructive' : 'outline'}
+                disabled={isLoading}
+                onClick={() => handleControl('red', 'TOGGLE')}
+                className="w-full text-xs h-7.5 gap-1.5 font-medium"
+              >
+                <Power className="w-3 h-3" />
+                {isRedOn ? 'Turn OFF' : 'Turn ON'}
+              </Button>
+            </div>
+          </div>
+
+          {/* YELLOW LED (GPIO 22) */}
+          <div className={`p-3.5 rounded-xl border transition-all duration-200 ${isYellowOn ? 'bg-amber-500/10 border-amber-500/40 shadow-xs' : 'bg-muted/40 border-border'}`}>
+            <div className="flex items-center justify-between mb-2.5">
+              <div className="flex items-center gap-2">
+                <span className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${isYellowOn ? 'bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.9)] animate-pulse' : 'bg-amber-950/60 border border-amber-800/40'}`} />
+                <div>
+                  <h4 className="text-xs font-bold text-foreground">YELLOW LED</h4>
+                  <span className="text-[10px] text-muted-foreground font-mono">GPIO 22</span>
+                </div>
+              </div>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${isYellowOn ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : 'bg-muted text-muted-foreground border-border'}`}>
+                {ledStates.yellow}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant={isYellowOn ? 'default' : 'outline'}
+                disabled={isLoading}
+                onClick={() => handleControl('yellow', 'TOGGLE')}
+                className={`w-full text-xs h-7.5 gap-1.5 font-medium ${isYellowOn ? 'bg-amber-500 hover:bg-amber-600 text-slate-950 border-amber-500' : ''}`}
+              >
+                <Power className="w-3 h-3" />
+                {isYellowOn ? 'Turn OFF' : 'Turn ON'}
+              </Button>
+            </div>
+          </div>
+
+          {/* GREEN LED (GPIO 23) */}
+          <div className={`p-3.5 rounded-xl border transition-all duration-200 ${isGreenOn ? 'bg-emerald-500/10 border-emerald-500/40 shadow-xs' : 'bg-muted/40 border-border'}`}>
+            <div className="flex items-center justify-between mb-2.5">
+              <div className="flex items-center gap-2">
+                <span className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${isGreenOn ? 'bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.9)] animate-pulse' : 'bg-emerald-950/60 border border-emerald-800/40'}`} />
+                <div>
+                  <h4 className="text-xs font-bold text-foreground">GREEN LED</h4>
+                  <span className="text-[10px] text-muted-foreground font-mono">GPIO 23</span>
+                </div>
+              </div>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${isGreenOn ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-muted text-muted-foreground border-border'}`}>
+                {ledStates.green}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant={isGreenOn ? 'default' : 'outline'}
+                disabled={isLoading}
+                onClick={() => handleControl('green', 'TOGGLE')}
+                className={`w-full text-xs h-7.5 gap-1.5 font-medium ${isGreenOn ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''}`}
+              >
+                <Power className="w-3 h-3" />
+                {isGreenOn ? 'Turn OFF' : 'Turn ON'}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Master & Preset Controls */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-2 border-t border-border/80 text-xs">
+          {/* Traffic Light Presets */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[11px] font-semibold text-muted-foreground mr-1 flex items-center gap-1">
+              <Radio className="w-3 h-3 text-primary" /> Presets:
+            </span>
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={isLoading}
+              onClick={() => handlePreset('red')}
+              className="text-[11px] h-6 px-2 hover:border-rose-500 hover:text-rose-400"
+            >
+              🔴 Stop (Red)
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={isLoading}
+              onClick={() => handlePreset('yellow')}
+              className="text-[11px] h-6 px-2 hover:border-amber-500 hover:text-amber-300"
+            >
+              🟡 Caution (Yellow)
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={isLoading}
+              onClick={() => handlePreset('green')}
+              className="text-[11px] h-6 px-2 hover:border-emerald-500 hover:text-emerald-400"
+            >
+              🟢 Go (Green)
+            </Button>
+          </div>
+
+          {/* Master All ON / All OFF Buttons */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Button
+              size="xs"
+              variant="secondary"
+              disabled={isLoading || !anyOn}
+              onClick={() => handleControl('all', 'OFF')}
+              className="text-[11px] h-6 px-2.5"
+            >
+              All OFF
+            </Button>
+            <Button
+              size="xs"
+              variant="default"
+              disabled={isLoading}
+              onClick={() => handleControl('all', 'ON')}
+              className="text-[11px] h-6 px-2.5"
+            >
+              All ON
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={isLoading}
+              onClick={() => handleControl('all', 'TOGGLE')}
+              className="text-[11px] h-6 px-2"
+            >
+              Toggle All
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
