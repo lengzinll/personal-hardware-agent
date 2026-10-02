@@ -2,7 +2,7 @@ import os
 import asyncio
 import re
 from datetime import datetime, UTC
-from typing import Dict, Any, Literal, List, Optional
+from typing import Dict, Any, Literal, List, Optional, Union
 from database import get_setting, set_setting, add_log
 from config import settings
 
@@ -137,40 +137,38 @@ def _set_hardware_pin(pin: int, state: str, device_name: str = "pin") -> Dict[st
                 expected_val = Value.INACTIVE if state == "ON" else Value.ACTIVE
             else:
                 expected_val = Value.ACTIVE if state == "ON" else Value.INACTIVE
-            
+
             _gpio_request.set_value(pin, expected_val)
-            
-            # Hardware verification: attempt read-back of output line if supported
+
+            # Hardware verification
             verified = True
             try:
                 actual_val = _gpio_request.get_value(pin)
                 verified = (actual_val == expected_val)
             except Exception:
-                verified = True  # Write succeeded even if readback isn't supported
-            
+                verified = True
+
             _pin_health[device_name] = {
-                "board_pin": settings.LAMP_PIN if device_name == "lamp" else getattr(settings, f"{device_name.upper()}_PIN", pin),
                 "gpio": pin,
-                "last_status": f"Successfully set to {state}",
+                "last_status": f"Hardware {state}",
                 "ok": True,
                 "verified": verified,
                 "timestamp": datetime.now(UTC).isoformat(),
             }
-
             return {
                 "success": True,
                 "mode": "hardware",
                 "pin": pin,
                 "written": True,
                 "verified": verified,
-                "message": f"Hardware signal confirmed on GPIO {pin} ({state})",
+                "message": f"Hardware signal write verified for GPIO {pin}",
             }
         except Exception as e:
-            error_msg = f"Failed writing to GPIO {pin}: {e}"
-            print(f"[GPIO Hardware Error] {error_msg}")
+            error_msg = f"Failed to set GPIO {pin}: {e}"
+            print(f"[Hardware Warning] {error_msg}")
             _pin_health[device_name] = {
                 "gpio": pin,
-                "last_status": error_msg,
+                "last_status": f"Error: {e}",
                 "ok": False,
                 "verified": False,
                 "timestamp": datetime.now(UTC).isoformat(),
@@ -209,6 +207,37 @@ def get_lamp_state() -> str:
         return "ON" if val == "ON" else "OFF"
     except Exception:
         return "OFF"
+
+
+def get_lamp_auto_mode() -> bool:
+    """Check whether automatic detection / endpoint triggers are allowed to toggle the lamp."""
+    try:
+        val = get_setting("lamp_auto_mode", "false").lower()
+        return val in ("true", "1", "yes", "on")
+    except Exception:
+        return False
+
+
+def set_lamp_auto_mode(enabled: bool) -> Dict[str, Any]:
+    """Enable or disable Auto Mode for the lamp."""
+    val_str = "true" if enabled else "false"
+    try:
+        set_setting("lamp_auto_mode", val_str)
+        add_log("lamp_auto_mode", f"Lamp Auto Mode set to {val_str.upper()}")
+    except Exception as e:
+        print(f"Failed to persist lamp_auto_mode: {e}")
+
+    states = get_all_led_states()
+    _schedule_broadcast(states)
+
+    status_str = "ENABLED" if enabled else "DISABLED"
+    return {
+        "success": True,
+        "auto_mode": enabled,
+        "message": f"Lamp Auto Mode is now {status_str}.",
+        "speechText": f"Lamp auto mode is now {status_str.lower()}.",
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
 
 
 def get_led_state(color: Literal["red", "yellow", "green"]) -> str:
@@ -261,8 +290,35 @@ def set_lamp_state(action: ActionType) -> tuple[str, Dict[str, Any]]:
     return new_state, hw_result
 
 
-def control_lamp(action: ActionType = "TOGGLE") -> Dict[str, Any]:
+def control_lamp(
+    action: ActionType = "TOGGLE",
+    force: bool = False,
+    source: Literal["manual", "agent", "auto"] = "manual",
+) -> Dict[str, Any]:
+    """
+    Controls the lamp relay.
+    - If source == "auto" (YOLO detection / automatic trigger endpoints) and auto_mode is OFF:
+      the automatic request is safely blocked.
+    - If force == True or source in ("manual", "agent"):
+      control is always permitted for user UI actions and AI Agent commands.
+    """
+    auto_mode = get_lamp_auto_mode()
     current = get_lamp_state()
+
+    # Block automated triggers when auto_mode is disabled
+    if source == "auto" and not auto_mode and not force:
+        return {
+            "success": False,
+            "allowed": False,
+            "auto_mode": False,
+            "target": "lamp",
+            "state": current,
+            "states": get_all_led_states(),
+            "message": "Lamp Auto Mode is DISABLED. Automated triggers are blocked. (Set Auto Mode to True or control via AI Voice Agent).",
+            "speechText": "Auto mode is disabled for the lamp. Only AI voice agent or manual commands are allowed.",
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+
     if action == "TOGGLE":
         target_state = "OFF" if current == "ON" else "ON"
     else:
@@ -279,6 +335,8 @@ def control_lamp(action: ActionType = "TOGGLE") -> Dict[str, Any]:
 
     return {
         "success": hw_result.get("success", True),
+        "allowed": True,
+        "auto_mode": auto_mode,
         "target": "lamp",
         "state": new_state,
         "states": states,
@@ -322,13 +380,12 @@ def control_leds(
     """
     color_clean = color.lower()
     if color_clean == "lamp":
-        return control_lamp(action)
+        return control_lamp(action, force=True, source="manual")
 
     if color_clean not in ("red", "yellow", "green", "all"):
         color_clean = "all"
 
     if color_clean == "all":
-        # Control all LEDs at once
         current_states = get_all_led_states()
         if action == "TOGGLE":
             target_state: ActionType = "OFF" if any(v == "ON" for v in current_states.values()) else "ON"
@@ -356,7 +413,6 @@ def control_leds(
             "timestamp": datetime.now(UTC).isoformat(),
         }
     else:
-        # Control specific color
         new_state, hw_result = set_single_led(color_clean, action)  # type: ignore
         new_states = get_all_led_states()
         speech_text = f"The {color_clean} light is now {new_state}"
@@ -374,6 +430,130 @@ def control_leds(
             "speechText": speech_text,
             "timestamp": datetime.now(UTC).isoformat(),
         }
+
+
+def parse_duration(text: str) -> Optional[int]:
+    """
+    Extracts duration in seconds from human text (e.g. '5 seconds', '2m', '1 minute', '10s').
+    """
+    if not text:
+        return None
+
+    text_lower = text.lower()
+    match = re.search(r'(\d+(?:\.\d+)?)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours)?', text_lower)
+    if not match:
+        return None
+
+    val = float(match.group(1))
+    unit = match.group(2) or "s"
+
+    if unit in ("m", "min", "minute", "minutes"):
+        return int(val * 60)
+    elif unit in ("h", "hr", "hour", "hours"):
+        return int(val * 3600)
+    return int(val)
+
+
+def parse_traffic_sequence(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Parses natural language requests for traffic light sequences/cycles.
+    e.g. 'cycle traffic light', 'run traffic sequence 5 times', 'start traffic light pattern'.
+    """
+    lower = text.lower()
+    if re.search(r'\b(start|run|play|loop|cycle)\s+(traffic|sequence|pattern|lights?|cycle)\b', lower) or re.search(r'\btraffic\s+(mode|cycle|sequence|pattern)\b', lower):
+        cycles_match = re.search(r'(\d+)\s*(?:times|cycles|reps)?', lower)
+        cycles = int(cycles_match.group(1)) if cycles_match else 3
+        interval_match = re.search(r'(?:every|interval\s+of)?\s*(\d+(?:\.\d+)?)\s*(?:s|sec|seconds)', lower)
+        interval = float(interval_match.group(1)) if interval_match else 2.0
+        return {"cycles": cycles, "interval": interval}
+    return None
+
+
+def control_leds_timed(
+    color: ColorType = "all",
+    action: ActionType = "ON",
+    duration_seconds: int = 5,
+) -> Dict[str, Any]:
+    """
+    Turns an LED (or lamp/all) ON immediately, and schedules an automatic turn OFF after duration_seconds.
+    """
+    timer_key = color.lower()
+    if timer_key in _active_timers:
+        _active_timers[timer_key].cancel()
+
+    res = control_leds(color=color, action=action)
+
+    async def _auto_off_task():
+        try:
+            await asyncio.sleep(duration_seconds)
+            control_leds(color=color, action="OFF")
+        except asyncio.CancelledError:
+            pass
+        finally:
+            _active_timers.pop(timer_key, None)
+
+    try:
+        loop = asyncio.get_running_loop()
+        _active_timers[timer_key] = loop.create_task(_auto_off_task())
+    except RuntimeError:
+        pass
+
+    speech_text = f"Turned {color} {action} for {duration_seconds} seconds"
+    res["speechText"] = speech_text
+    res["message"] = f'**Timed Action**: "{speech_text}"'
+    res["duration"] = duration_seconds
+    return res
+
+
+def run_traffic_sequence(
+    sequence_or_cycles: Union[Dict[str, Any], int] = 3,
+    interval: float = 2.0,
+) -> Dict[str, Any]:
+    """Starts an automated traffic light cycle (Red -> Yellow -> Green)."""
+    cancel_traffic_sequence()
+
+    if isinstance(sequence_or_cycles, dict):
+        cycles = sequence_or_cycles.get("cycles", 3)
+        interval = sequence_or_cycles.get("interval", interval)
+    else:
+        cycles = int(sequence_or_cycles)
+
+    async def _sequence_worker():
+        try:
+            for _ in range(cycles):
+                set_traffic_preset("red")
+                await asyncio.sleep(interval)
+                set_traffic_preset("yellow")
+                await asyncio.sleep(interval * 0.5)
+                set_traffic_preset("green")
+                await asyncio.sleep(interval)
+            set_traffic_preset("off")
+        except asyncio.CancelledError:
+            set_traffic_preset("off")
+
+    try:
+        loop = asyncio.get_running_loop()
+        _active_traffic_cycles["traffic"] = loop.create_task(_sequence_worker())
+    except RuntimeError:
+        pass
+
+    return {
+        "success": True,
+        "message": f"Started traffic sequence for {cycles} cycles.",
+        "speechText": f"Traffic light cycle started for {cycles} cycles.",
+    }
+
+
+def cancel_traffic_sequence() -> Dict[str, Any]:
+    """Cancels any running traffic sequence."""
+    if "traffic" in _active_traffic_cycles:
+        _active_traffic_cycles["traffic"].cancel()
+        _active_traffic_cycles.pop("traffic", None)
+    return {
+        "success": True,
+        "message": "Traffic sequence cancelled.",
+        "speechText": "Traffic sequence cancelled.",
+    }
 
 
 def set_traffic_preset(mode: Literal["red", "yellow", "green", "off", "all"]) -> Dict[str, Any]:
@@ -419,9 +599,9 @@ def set_traffic_preset(mode: Literal["red", "yellow", "green", "off", "all"]) ->
         speech_text = "All lights turned off."
 
     states = get_all_led_states()
-    
+
     _schedule_broadcast(states)
-    
+
     return {
         "success": True,
         "preset": mode_clean,
@@ -435,6 +615,7 @@ def set_traffic_preset(mode: Literal["red", "yellow", "green", "off", "all"]) ->
 
 def get_led_status() -> Dict[str, Any]:
     states = get_all_led_states()
+    auto_mode = get_lamp_auto_mode()
     on_lights = [k for k, v in states.items() if v == "ON"]
 
     items_summary = []
@@ -451,239 +632,12 @@ def get_led_status() -> Dict[str, Any]:
     return {
         "success": True,
         "states": states,
+        "auto_mode": {
+            "lamp": auto_mode,
+        },
         "onLights": on_lights,
         "hardware": get_hardware_info(),
         "message": f'**Hardware Status**: "{speech_text}"',
         "speechText": speech_text,
-        "timestamp": datetime.now(UTC).isoformat(),
-    }
-
-
-def parse_duration(duration_str: str) -> int:
-    """
-    Parses a duration string like '10s', '5min', '2 hours', '1 day' and returns seconds.
-    Returns the duration in seconds, or 0 if invalid.
-    """
-    duration_str = duration_str.strip().lower()
-    
-    match = re.match(r'^([\d.]+)\s*([a-z]+)?$', duration_str)
-    if not match:
-        return 0
-    
-    try:
-        value = float(match.group(1))
-        unit = match.group(2) or 's'
-    except (ValueError, AttributeError):
-        return 0
-    
-    conversions = {
-        's': 1, 'sec': 1, 'second': 1, 'seconds': 1,
-        'm': 60, 'min': 60, 'minute': 60, 'minutes': 60,
-        'h': 3600, 'hr': 3600, 'hour': 3600, 'hours': 3600,
-        'd': 86400, 'day': 86400, 'days': 86400,
-    }
-    
-    multiplier = conversions.get(unit, 1)
-    return max(1, int(value * multiplier))
-
-
-async def _auto_turnoff_timer(color: str, duration_seconds: int) -> None:
-    """
-    Internal coroutine that waits for duration_seconds then turns off the LED or lamp.
-    """
-    try:
-        await asyncio.sleep(duration_seconds)
-        
-        if color.lower() == "all":
-            for c in ["red", "yellow", "green"]:
-                set_single_led(c, "OFF")  # type: ignore
-            add_log("led_timer", f"All LEDs auto-turned OFF after {duration_seconds}s")
-        elif color.lower() == "lamp":
-            set_lamp_state("OFF")
-            add_log("lamp_timer", f"Lamp auto-turned OFF after {duration_seconds}s")
-        else:
-            set_single_led(color, "OFF")  # type: ignore
-            add_log("led_timer", f"{color} LED auto-turned OFF after {duration_seconds}s")
-        
-        final_states = get_all_led_states()
-        _schedule_broadcast(final_states)
-    except asyncio.CancelledError:
-        pass
-    except Exception as e:
-        print(f"[Timer Error] {color} auto-off failed: {e}")
-
-
-def control_leds_timed(
-    color: str = "all",
-    action: str = "ON",
-    duration_seconds: int = 0
-) -> Dict[str, Any]:
-    """
-    Controls LED or Lamp with optional auto-turn-off timer.
-    """
-    if color.lower() == "lamp":
-        result = control_lamp(action=action)  # type: ignore
-    else:
-        result = control_leds(color=color, action=action)  # type: ignore
-    
-    if action.upper() == "ON" and duration_seconds > 0:
-        timer_key = f"timer_{color}"
-        if timer_key in _active_timers:
-            _active_timers[timer_key].cancel()
-        
-        try:
-            task = asyncio.create_task(_auto_turnoff_timer(color, duration_seconds))
-            _active_timers[timer_key] = task
-            
-            result["timerSeconds"] = duration_seconds
-            result["speechText"] += f" (will turn off in {duration_seconds} seconds)"
-            result["message"] += f" *scheduled auto-off in {duration_seconds}s*"
-        except Exception as e:
-            print(f"[Timer Error] Failed to schedule timer for {color}: {e}")
-    
-    return result
-
-
-def parse_traffic_sequence(text: str) -> List[Dict[str, Any]]:
-    """
-    Parses a custom traffic light sequence from natural language.
-    """
-    clean = text.strip().lower()
-    if not clean:
-        return []
-
-    pattern = re.compile(
-        r"(red|yellow|green)"
-        r"(?:\s+(?:light|led))?"
-        r"(?:\s+(?:turn|switch|power))?"
-        r"(?:\s+on)?"
-        r"(?:\s+(?:for|in))?"
-        r"\s*([0-9.]+)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days)?",
-        re.IGNORECASE,
-    )
-
-    matches = pattern.findall(clean)
-    if len(matches) < 2:
-        return []
-
-    sequence: List[Dict[str, Any]] = []
-    for color, value, unit in matches:
-        try:
-            duration_seconds = parse_duration(f"{value}{unit or 's'}")
-        except Exception:
-            continue
-        if duration_seconds <= 0:
-            continue
-        sequence.append({"color": color.lower(), "duration_seconds": duration_seconds})
-
-    if len(sequence) < 2 or len({step["color"] for step in sequence}) < 2:
-        return []
-
-    return sequence
-
-
-async def _run_traffic_sequence(sequence: List[Dict[str, Any]], loop_forever: bool = True) -> None:
-    """Run a custom traffic pattern in order. By default it keeps looping until cancelled."""
-    try:
-        if not sequence:
-            return
-
-        while True:
-            for step in sequence:
-                color = step["color"]
-                seconds = int(step["duration_seconds"])
-
-                for led in ["red", "yellow", "green"]:
-                    set_single_led(led, "OFF")
-                set_single_led(color, "ON")
-                _schedule_broadcast(get_all_led_states())
-                await asyncio.sleep(seconds)
-
-            if not loop_forever:
-                break
-
-        for led in ["red", "yellow", "green"]:
-            set_single_led(led, "OFF")
-        _schedule_broadcast(get_all_led_states())
-    except asyncio.CancelledError:
-        for led in ["red", "yellow", "green"]:
-            set_single_led(led, "OFF")
-        _schedule_broadcast(get_all_led_states())
-        pass
-    except Exception as e:
-        print(f"[Traffic Cycle Error] {e}")
-
-
-def run_traffic_sequence(sequence: List[Dict[str, Any]], loop_forever: bool = True) -> Dict[str, Any]:
-    """
-    Starts a custom traffic-light sequence and keeps it looping by default.
-    """
-    if not sequence:
-        return {
-            "success": False,
-            "message": "No traffic sequence was provided.",
-            "speechText": "No traffic sequence provided.",
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
-
-    cleaned_sequence: List[Dict[str, Any]] = []
-    for step in sequence:
-        color = str(step.get("color", "")).lower()
-        if color not in {"red", "yellow", "green"}:
-            continue
-        duration = int(step.get("duration_seconds", 0) or 0)
-        if duration <= 0:
-            continue
-        cleaned_sequence.append({"color": color, "duration_seconds": duration})
-
-    if not cleaned_sequence:
-        return {
-            "success": False,
-            "message": "Traffic sequence contained no valid color-duration steps.",
-            "speechText": "Traffic sequence contained no valid steps.",
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
-
-    for task in list(_active_traffic_cycles.values()):
-        task.cancel()
-    _active_traffic_cycles.clear()
-
-    task = asyncio.create_task(_run_traffic_sequence(cleaned_sequence, loop_forever=loop_forever))
-    cycle_id = f"traffic_cycle_{datetime.now(UTC).timestamp()}"
-    _active_traffic_cycles[cycle_id] = task
-
-    summary = " → ".join(f"{step['color']} {step['duration_seconds']}s" for step in cleaned_sequence)
-    loop_label = "looping" if loop_forever else "single-run"
-    return {
-        "success": True,
-        "sequence": cleaned_sequence,
-        "loop": loop_forever,
-        "hardware": get_hardware_info(),
-        "message": f'**Traffic Sequence**: "{summary}" started in {loop_label} mode.',
-        "speechText": f"Starting {loop_label} traffic sequence: {summary}.",
-        "timestamp": datetime.now(UTC).isoformat(),
-    }
-
-
-def cancel_traffic_sequence() -> Dict[str, Any]:
-    """Stops any active traffic light cycle and turns all LEDs off."""
-    cancelled = False
-    for task in list(_active_traffic_cycles.values()):
-        task.cancel()
-        cancelled = True
-    _active_traffic_cycles.clear()
-
-    for led in ["red", "yellow", "green"]:
-        set_single_led(led, "OFF")
-
-    states = get_all_led_states()
-    _schedule_broadcast(states)
-    return {
-        "success": True,
-        "cancelled": cancelled,
-        "states": states,
-        "hardware": get_hardware_info(),
-        "message": f'**Traffic Sequence**: "Cancelled and all lights turned off."' if cancelled else '**Traffic Sequence**: No active sequence to cancel.',
-        "speechText": "Traffic sequence cancelled. All lights are off." if cancelled else "There is no active traffic sequence to cancel.",
         "timestamp": datetime.now(UTC).isoformat(),
     }

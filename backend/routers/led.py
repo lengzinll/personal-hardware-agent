@@ -7,6 +7,8 @@ from services.led_tool import (
     set_traffic_preset,
     control_lamp,
     get_lamp_state,
+    get_lamp_auto_mode,
+    set_lamp_auto_mode,
     get_hardware_info,
 )
 
@@ -16,10 +18,15 @@ class LedActionRequest(BaseModel):
     color: Optional[Literal["red", "yellow", "green", "lamp", "all"]] = "all"
     action: Optional[Literal["ON", "OFF", "TOGGLE"]] = "TOGGLE"
     preset: Optional[Literal["red", "yellow", "green", "off", "all"]] = None
+    force: Optional[bool] = False
+    source: Optional[Literal["manual", "agent", "auto"]] = "manual"
+
+class AutoModeRequest(BaseModel):
+    enabled: Optional[bool] = None
 
 @router.get("")
 def read_led():
-    """Get the live status of all LEDs (Red, Yellow, Green, Lamp) with hardware health."""
+    """Get the live status of all LEDs (Red, Yellow, Green, Lamp) with hardware health and auto mode."""
     return get_led_status()
 
 @router.get("/hardware")
@@ -38,37 +45,73 @@ def set_led(body: Optional[LedActionRequest] = None):
 
     color = body.color if body and body.color else "all"
     action = body.action if body and body.action else "TOGGLE"
+    force = body.force if body and body.force is not None else False
+    source = body.source if body and body.source else "manual"
     
     if color == "lamp":
-        return control_lamp(action=action)
+        return control_lamp(action=action, force=force, source=source)
 
     return control_leds(color=color, action=action)
+
+# --- Lamp Auto Mode Endpoints ---
+
+@router.get("/lamp/auto")
+def get_lamp_auto_status():
+    """Check whether automatic detection / endpoint triggers are allowed to control the lamp."""
+    return {
+        "success": True,
+        "auto_mode": get_lamp_auto_mode(),
+        "state": get_lamp_state(),
+    }
+
+@router.post("/lamp/auto")
+def set_lamp_auto_status(body: Optional[AutoModeRequest] = None):
+    """Enable or disable Auto Mode for the lamp."""
+    if body is not None and body.enabled is not None:
+        target_val = body.enabled
+    else:
+        # Toggle if not explicitly specified
+        target_val = not get_lamp_auto_mode()
+    return set_lamp_auto_mode(target_val)
 
 # --- Direct Convenience Endpoints for Lamp & Presets ---
 
 @router.get("/lamp/toggle")
 @router.post("/lamp/toggle")
-def toggle_lamp_endpoint():
-    """Toggle the lamp relay state (ON <-> OFF)."""
-    return control_lamp(action="TOGGLE")
+def toggle_lamp_endpoint(auto: bool = True, force: bool = False):
+    """
+    Toggle the lamp relay state (ON <-> OFF).
+    If auto=True and Auto Mode is disabled, request is safely ignored.
+    """
+    source = "auto" if auto and not force else "manual"
+    return control_lamp(action="TOGGLE", force=force, source=source)
 
 @router.get("/lamp/on")
 @router.post("/lamp/on")
-def lamp_on_endpoint():
-    """Turn the lamp relay ON."""
-    return control_lamp(action="ON")
+def lamp_on_endpoint(auto: bool = True, force: bool = False):
+    """
+    Turn the lamp relay ON.
+    If auto=True and Auto Mode is disabled, request is safely ignored.
+    """
+    source = "auto" if auto and not force else "manual"
+    return control_lamp(action="ON", force=force, source=source)
 
 @router.get("/lamp/off")
 @router.post("/lamp/off")
-def lamp_off_endpoint():
-    """Turn the lamp relay OFF."""
-    return control_lamp(action="OFF")
+def lamp_off_endpoint(auto: bool = True, force: bool = False):
+    """
+    Turn the lamp relay OFF.
+    If auto=True and Auto Mode is disabled, request is safely ignored.
+    """
+    source = "auto" if auto and not force else "manual"
+    return control_lamp(action="OFF", force=force, source=source)
 
 @router.get("/lamp")
 @router.post("/lamp")
-def lamp_endpoint(action: Optional[Literal["ON", "OFF", "TOGGLE"]] = "TOGGLE"):
-    """Control the lamp relay with a specified action."""
-    return control_lamp(action=action)
+def lamp_endpoint(action: Optional[Literal["ON", "OFF", "TOGGLE"]] = "TOGGLE", auto: bool = False, force: bool = True):
+    """Control the lamp relay with a specified action (Defaults to manual/forced)."""
+    source = "auto" if auto and not force else "manual"
+    return control_lamp(action=action, force=force, source=source)
 
 @router.get("/red")
 def red_preset():
