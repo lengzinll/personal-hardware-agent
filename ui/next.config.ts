@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ["*.trycloudflare.com", "localhost:3000", "192.168.39.144:3000"],
+  allowedDevOrigins: ["*.trycloudflare.com", "localhost:3000"],
   async rewrites() {
     return [
       {

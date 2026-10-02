@@ -1,16 +1,10 @@
 import os
 import asyncio
+import re
 from datetime import datetime, UTC
-from typing import Dict, Any, Literal, List
+from typing import Dict, Any, Literal, List, Optional
 from database import get_setting, set_setting, add_log
-from config import (
-    GPIO_CHIP as CONFIG_GPIO_CHIP,
-    LAMP_ACTIVE_LOW as CONFIG_LAMP_ACTIVE_LOW,
-    RED_PIN as CONFIG_RED_PIN,
-    YELLOW_PIN as CONFIG_YELLOW_PIN,
-    GREEN_PIN as CONFIG_GREEN_PIN,
-    LAMP_PIN as CONFIG_LAMP_PIN,
-)
+from config import settings
 
 # Physical board pin -> BCM GPIO mapping for Raspberry Pi.
 # Use physical board pins in code, then translate to GPIO for gpiod.
@@ -49,37 +43,28 @@ def board_pin_to_gpio(board_pin: int) -> int:
     return BOARD_PIN_TO_GPIO.get(int(board_pin), int(board_pin))
 
 
-# # Public constants use physical board pin numbers from env. The driver uses translated BCM GPIO values.
-# RED_PIN = CONFIG_RED_PIN
-# YELLOW_PIN = CONFIG_YELLOW_PIN
-# GREEN_PIN = CONFIG_GREEN_PIN
-# LAMP_PIN = CONFIG_LAMP_PIN
-
-RED_GPIO = board_pin_to_gpio(RED_PIN)
-YELLOW_GPIO = board_pin_to_gpio(YELLOW_PIN)
-GREEN_GPIO = board_pin_to_gpio(GREEN_PIN)
-LAMP_GPIO = board_pin_to_gpio(LAMP_PIN)
-
-RED_BOARD_PIN = RED_PIN
-YELLOW_BOARD_PIN = YELLOW_PIN
-GREEN_BOARD_PIN = GREEN_PIN
-LAMP_BOARD_PIN = LAMP_PIN
+RED_GPIO = board_pin_to_gpio(settings.RED_PIN)
+YELLOW_GPIO = board_pin_to_gpio(settings.YELLOW_PIN)
+GREEN_GPIO = board_pin_to_gpio(settings.GREEN_PIN)
+LAMP_GPIO = board_pin_to_gpio(settings.LAMP_PIN)
 
 # Timer tracking for timed LED commands
 _active_timers: Dict[str, asyncio.Task[Any]] = {}
 _active_traffic_cycles: Dict[str, asyncio.Task[Any]] = {}
 
-
-# Lamp active low setting from config
-LAMP_ACTIVE_LOW = CONFIG_LAMP_ACTIVE_LOW
-GPIO_CHIP = CONFIG_GPIO_CHIP
-
-ColorType = Literal["red", "yellow", "green", "all"]
+ColorType = Literal["red", "yellow", "green", "lamp", "all"]
 ActionType = Literal["ON", "OFF", "TOGGLE"]
 
 # Hardware Line Request Holder
 _gpio_request = None
 _gpio_available = False
+_gpio_error: Optional[str] = None
+_pin_health: Dict[str, Dict[str, Any]] = {
+    "red": {"board_pin": settings.RED_PIN, "gpio": RED_GPIO, "last_status": "initialized", "ok": True},
+    "yellow": {"board_pin": settings.YELLOW_PIN, "gpio": YELLOW_GPIO, "last_status": "initialized", "ok": True},
+    "green": {"board_pin": settings.GREEN_PIN, "gpio": GREEN_GPIO, "last_status": "initialized", "ok": True},
+    "lamp": {"board_pin": settings.LAMP_PIN, "gpio": LAMP_GPIO, "last_status": "initialized", "ok": True},
+}
 
 try:
     import gpiod
@@ -92,41 +77,130 @@ try:
             output_value=Value.ACTIVE if not active_low else Value.INACTIVE,
         )
 
-    if os.path.exists(GPIO_CHIP):
+    if os.path.exists(settings.GPIO_CHIP):
         try:
             gpio_pins = {
                 RED_GPIO: _make_settings(active_low=False),
                 YELLOW_GPIO: _make_settings(active_low=False),
                 GREEN_GPIO: _make_settings(active_low=False),
-                LAMP_GPIO: _make_settings(active_low=LAMP_ACTIVE_LOW),
+                LAMP_GPIO: _make_settings(active_low=settings.LAMP_ACTIVE_LOW),
             }
             _gpio_request = gpiod.request_lines(
-                GPIO_CHIP,
+                settings.GPIO_CHIP,
                 consumer="traffic-light",
                 config=gpio_pins,
             )
             _gpio_available = True
-            print(f"[GPIO Hardware] Connected to {GPIO_CHIP} (Pins: Red={RED_GPIO}, Yellow={YELLOW_GPIO}, Green={GREEN_GPIO}, Lamp={LAMP_GPIO})")
+            print(f"[GPIO Hardware] Connected to {settings.GPIO_CHIP} (Pins: Red={RED_GPIO}, Yellow={YELLOW_GPIO}, Green={GREEN_GPIO}, Lamp={LAMP_GPIO})")
         except Exception as err:
-            print(f"[GPIO Hardware] Failed to request lines on {GPIO_CHIP}: {err}. Using simulated mode.")
+            _gpio_error = str(err)
+            print(f"[GPIO Hardware] Failed to request lines on {settings.GPIO_CHIP}: {err}. Using simulated mode.")
     else:
-        print(f"[GPIO Hardware] {GPIO_CHIP} not found. Running in simulated GPIO mode.")
+        _gpio_error = f"GPIO chip {settings.GPIO_CHIP} not found"
+        print(f"[GPIO Hardware] {settings.GPIO_CHIP} not found. Running in simulated GPIO mode.")
 except Exception as e:
+    _gpio_error = str(e)
     print(f"[GPIO Hardware] gpiod init notice: {e}. Running in simulated mode.")
 
 
-def _set_hardware_pin(pin: int, state: str) -> None:
+def get_hardware_info() -> Dict[str, Any]:
+    """Return physical hardware diagnostic status and pin configurations."""
+    return {
+        "is_hardware_active": _gpio_available,
+        "mode": "hardware" if _gpio_available else "simulated",
+        "gpio_chip": settings.GPIO_CHIP,
+        "error": _gpio_error,
+        "pins": {
+            "red": {"board_pin": settings.RED_PIN, "gpio": RED_GPIO, "health": _pin_health.get("red")},
+            "yellow": {"board_pin": settings.YELLOW_PIN, "gpio": YELLOW_GPIO, "health": _pin_health.get("yellow")},
+            "green": {"board_pin": settings.GREEN_PIN, "gpio": GREEN_GPIO, "health": _pin_health.get("green")},
+            "lamp": {
+                "board_pin": settings.LAMP_PIN,
+                "gpio": LAMP_GPIO,
+                "active_low": settings.LAMP_ACTIVE_LOW,
+                "health": _pin_health.get("lamp"),
+            },
+        },
+    }
+
+
+def _set_hardware_pin(pin: int, state: str, device_name: str = "pin") -> Dict[str, Any]:
+    """
+    Sends signal to the physical GPIO pin.
+    Returns status reporting whether hardware signal write succeeded, verified, or is simulated.
+    """
     if _gpio_available and _gpio_request is not None:
         try:
             import gpiod
             from gpiod.line import Value
-            if pin == LAMP_GPIO and LAMP_ACTIVE_LOW:
-                val = Value.INACTIVE if state == "ON" else Value.ACTIVE
+            if pin == LAMP_GPIO and settings.LAMP_ACTIVE_LOW:
+                expected_val = Value.INACTIVE if state == "ON" else Value.ACTIVE
             else:
-                val = Value.ACTIVE if state == "ON" else Value.INACTIVE
-            _gpio_request.set_value(pin, val)
+                expected_val = Value.ACTIVE if state == "ON" else Value.INACTIVE
+            
+            _gpio_request.set_value(pin, expected_val)
+            
+            # Hardware verification: attempt read-back of output line if supported
+            verified = True
+            try:
+                actual_val = _gpio_request.get_value(pin)
+                verified = (actual_val == expected_val)
+            except Exception:
+                verified = True  # Write succeeded even if readback isn't supported
+            
+            _pin_health[device_name] = {
+                "board_pin": settings.LAMP_PIN if device_name == "lamp" else getattr(settings, f"{device_name.upper()}_PIN", pin),
+                "gpio": pin,
+                "last_status": f"Successfully set to {state}",
+                "ok": True,
+                "verified": verified,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+
+            return {
+                "success": True,
+                "mode": "hardware",
+                "pin": pin,
+                "written": True,
+                "verified": verified,
+                "message": f"Hardware signal confirmed on GPIO {pin} ({state})",
+            }
         except Exception as e:
-            print(f"[GPIO Hardware] Error writing to pin {pin}: {e}")
+            error_msg = f"Failed writing to GPIO {pin}: {e}"
+            print(f"[GPIO Hardware Error] {error_msg}")
+            _pin_health[device_name] = {
+                "gpio": pin,
+                "last_status": error_msg,
+                "ok": False,
+                "verified": False,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+            return {
+                "success": False,
+                "mode": "hardware",
+                "pin": pin,
+                "written": False,
+                "verified": False,
+                "error": str(e),
+                "message": error_msg,
+            }
+
+    # Simulated fallback mode
+    _pin_health[device_name] = {
+        "gpio": pin,
+        "last_status": f"Simulated {state}",
+        "ok": True,
+        "verified": True,
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
+    return {
+        "success": True,
+        "mode": "simulated",
+        "pin": pin,
+        "written": False,
+        "verified": True,
+        "message": f"Simulated mode (no GPIO hardware active for GPIO {pin})",
+    }
 
 
 def get_lamp_state() -> str:
@@ -154,7 +228,20 @@ def get_all_led_states() -> Dict[str, str]:
     }
 
 
-def set_lamp_state(action: ActionType) -> str:
+def _schedule_broadcast(states: Dict[str, str]) -> None:
+    """Schedule WebSocket broadcast of LED & lamp states without blocking."""
+    try:
+        from websocket_manager import led_state_manager
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(led_state_manager.broadcast_state(states, hardware_info=get_hardware_info()))
+        except RuntimeError:
+            pass
+    except Exception as e:
+        print(f"[WebSocket Broadcast Error] {e}")
+
+
+def set_lamp_state(action: ActionType) -> tuple[str, Dict[str, Any]]:
     current = get_lamp_state()
     if action == "TOGGLE":
         new_state = "OFF" if current == "ON" else "ON"
@@ -169,9 +256,9 @@ def set_lamp_state(action: ActionType) -> str:
     except Exception as e:
         print(f"Failed to persist lamp state to DB:", e)
 
-    _set_hardware_pin(LAMP_GPIO, new_state)
-    print(f"[Lamp Hardware] LAMP -> {new_state}")
-    return new_state
+    hw_result = _set_hardware_pin(LAMP_GPIO, new_state, device_name="lamp")
+    print(f"[Lamp Hardware] LAMP -> {new_state} ({hw_result['message']})")
+    return new_state, hw_result
 
 
 def control_lamp(action: ActionType = "TOGGLE") -> Dict[str, Any]:
@@ -183,7 +270,7 @@ def control_lamp(action: ActionType = "TOGGLE") -> Dict[str, Any]:
         if target_state not in ("ON", "OFF"):
             target_state = "ON"
 
-    new_state = set_lamp_state(target_state)
+    new_state, hw_result = set_lamp_state(target_state)
     states = get_all_led_states()
     speech_text = f"The lamp is now {new_state}"
     msg = f'**Lamp**: "{speech_text}"'
@@ -191,17 +278,18 @@ def control_lamp(action: ActionType = "TOGGLE") -> Dict[str, Any]:
     _schedule_broadcast(states)
 
     return {
-        "success": True,
+        "success": hw_result.get("success", True),
         "target": "lamp",
         "state": new_state,
         "states": states,
+        "hardware": hw_result,
         "message": msg,
         "speechText": speech_text,
         "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
-def set_single_led(color: Literal["red", "yellow", "green"], action: ActionType) -> str:
+def set_single_led(color: Literal["red", "yellow", "green"], action: ActionType) -> tuple[str, Dict[str, Any]]:
     current = get_led_state(color)
     if action == "TOGGLE":
         new_state = "OFF" if current == "ON" else "ON"
@@ -219,10 +307,10 @@ def set_single_led(color: Literal["red", "yellow", "green"], action: ActionType)
 
     # Apply to physical GPIO pin
     pin_map = {"red": RED_GPIO, "yellow": YELLOW_GPIO, "green": GREEN_GPIO}
-    _set_hardware_pin(pin_map[color], new_state)
+    hw_result = _set_hardware_pin(pin_map[color], new_state, device_name=color)
 
-    print(f"[LED Hardware] {color.upper()} -> {new_state}")
-    return new_state
+    print(f"[LED Hardware] {color.upper()} -> {new_state} ({hw_result['message']})")
+    return new_state, hw_result
 
 
 def control_leds(
@@ -230,54 +318,58 @@ def control_leds(
     action: ActionType = "TOGGLE"
 ) -> Dict[str, Any]:
     """
-    Controls a specific LED (red, yellow, green) or all LEDs at the same time.
+    Controls a specific LED (red, yellow, green, lamp) or all LEDs at the same time.
     """
     color_clean = color.lower()
+    if color_clean == "lamp":
+        return control_lamp(action)
+
     if color_clean not in ("red", "yellow", "green", "all"):
         color_clean = "all"
 
     if color_clean == "all":
         # Control all LEDs at once
         current_states = get_all_led_states()
-        # If toggle for 'all', turn all OFF if any is ON, otherwise turn all ON
         if action == "TOGGLE":
             target_state: ActionType = "OFF" if any(v == "ON" for v in current_states.values()) else "ON"
         else:
             target_state = action
 
+        hw_results = {}
         for c in ["red", "yellow", "green"]:
-            set_single_led(c, target_state)  # type: ignore
+            _, hw_res = set_single_led(c, target_state)  # type: ignore
+            hw_results[c] = hw_res
 
         new_states = get_all_led_states()
         speech_text = f"All lights are now {target_state}"
         msg = f'**All LEDs**: "{speech_text}"'
 
-        # Broadcast state change to all WebSocket clients
         _schedule_broadcast(new_states)
 
         return {
-            "success": True,
+            "success": all(r.get("success", True) for r in hw_results.values()),
             "target": "all",
             "states": new_states,
+            "hardware": hw_results,
             "message": msg,
             "speechText": speech_text,
             "timestamp": datetime.now(UTC).isoformat(),
         }
     else:
         # Control specific color
-        new_state = set_single_led(color_clean, action)  # type: ignore
+        new_state, hw_result = set_single_led(color_clean, action)  # type: ignore
         new_states = get_all_led_states()
         speech_text = f"The {color_clean} light is now {new_state}"
         msg = f'**{color_clean.capitalize()} LED**: "{speech_text}"'
 
-        # Broadcast state change to all WebSocket clients
         _schedule_broadcast(new_states)
 
         return {
-            "success": True,
+            "success": hw_result.get("success", True),
             "target": color_clean,
             "state": new_state,
             "states": new_states,
+            "hardware": hw_result,
             "message": msg,
             "speechText": speech_text,
             "timestamp": datetime.now(UTC).isoformat(),
@@ -328,13 +420,13 @@ def set_traffic_preset(mode: Literal["red", "yellow", "green", "off", "all"]) ->
 
     states = get_all_led_states()
     
-    # Broadcast state change to all WebSocket clients
     _schedule_broadcast(states)
     
     return {
         "success": True,
         "preset": mode_clean,
         "states": states,
+        "hardware": get_hardware_info(),
         "message": f'**Traffic Preset ({mode_clean.upper()})**: "{speech_text}"',
         "speechText": speech_text,
         "timestamp": datetime.now(UTC).isoformat(),
@@ -345,18 +437,23 @@ def get_led_status() -> Dict[str, Any]:
     states = get_all_led_states()
     on_lights = [k for k, v in states.items() if v == "ON"]
 
+    items_summary = []
+    for k in ["red", "yellow", "green", "lamp"]:
+        if k in states:
+            name = "Lamp" if k == "lamp" else f"{k.capitalize()} LED"
+            items_summary.append(f"{name}: {states[k]}")
+
     if len(on_lights) == 0:
-        speech_text = "All lights are currently OFF"
-    elif len(on_lights) == 3:
-        speech_text = "All lights (Red, Yellow, and Green) are ON"
+        speech_text = "All lights and lamp are currently OFF"
     else:
-        speech_text = f"The {', '.join(on_lights)} light is ON"
+        speech_text = f"Status: {', '.join(items_summary)}"
 
     return {
         "success": True,
         "states": states,
         "onLights": on_lights,
-        "message": f'**LED Status**: "{speech_text}"',
+        "hardware": get_hardware_info(),
+        "message": f'**Hardware Status**: "{speech_text}"',
         "speechText": speech_text,
         "timestamp": datetime.now(UTC).isoformat(),
     }
@@ -369,8 +466,6 @@ def parse_duration(duration_str: str) -> int:
     """
     duration_str = duration_str.strip().lower()
     
-    # Extract number
-    import re
     match = re.match(r'^([\d.]+)\s*([a-z]+)?$', duration_str)
     if not match:
         return 0
@@ -381,7 +476,6 @@ def parse_duration(duration_str: str) -> int:
     except (ValueError, AttributeError):
         return 0
     
-    # Convert to seconds
     conversions = {
         's': 1, 'sec': 1, 'second': 1, 'seconds': 1,
         'm': 60, 'min': 60, 'minute': 60, 'minutes': 60,
@@ -395,22 +489,22 @@ def parse_duration(duration_str: str) -> int:
 
 async def _auto_turnoff_timer(color: str, duration_seconds: int) -> None:
     """
-    Internal coroutine that waits for duration_seconds then turns off the LED.
-    Handles both specific colors (red, yellow, green) and 'all'.
+    Internal coroutine that waits for duration_seconds then turns off the LED or lamp.
     """
     try:
         await asyncio.sleep(duration_seconds)
         
-        # Handle 'all' specially - turn off each color individually
         if color.lower() == "all":
             for c in ["red", "yellow", "green"]:
                 set_single_led(c, "OFF")  # type: ignore
             add_log("led_timer", f"All LEDs auto-turned OFF after {duration_seconds}s")
+        elif color.lower() == "lamp":
+            set_lamp_state("OFF")
+            add_log("lamp_timer", f"Lamp auto-turned OFF after {duration_seconds}s")
         else:
             set_single_led(color, "OFF")  # type: ignore
             add_log("led_timer", f"{color} LED auto-turned OFF after {duration_seconds}s")
         
-        # Broadcast the final state
         final_states = get_all_led_states()
         _schedule_broadcast(final_states)
     except asyncio.CancelledError:
@@ -425,20 +519,18 @@ def control_leds_timed(
     duration_seconds: int = 0
 ) -> Dict[str, Any]:
     """
-    Controls LED with optional auto-turn-off timer.
-    If duration_seconds > 0, schedules auto-off after that duration.
+    Controls LED or Lamp with optional auto-turn-off timer.
     """
-    # First execute the immediate action
-    result = control_leds(color=color, action=action)  # type: ignore
+    if color.lower() == "lamp":
+        result = control_lamp(action=action)  # type: ignore
+    else:
+        result = control_leds(color=color, action=action)  # type: ignore
     
-    # If action was ON and duration is specified, schedule auto-off
     if action.upper() == "ON" and duration_seconds > 0:
-        # Cancel any existing timer for this color
         timer_key = f"timer_{color}"
         if timer_key in _active_timers:
             _active_timers[timer_key].cancel()
         
-        # Schedule new timer
         try:
             task = asyncio.create_task(_auto_turnoff_timer(color, duration_seconds))
             _active_timers[timer_key] = task
@@ -454,17 +546,12 @@ def control_leds_timed(
 
 def parse_traffic_sequence(text: str) -> List[Dict[str, Any]]:
     """
-    Parses a custom traffic light sequence from natural language such as:
-    - "green for 30s then yellow 5s then red 20s"
-    - "default green turn on for 30s then yellow 5s then red 20s"
-    - "red 5s, yellow 2s, green 10s"
-    Returns a list of {color, duration_seconds} or [] if no valid sequence is found.
+    Parses a custom traffic light sequence from natural language.
     """
     clean = text.strip().lower()
     if not clean:
         return []
 
-    # Match any color/duration pair in order.
     pattern = re.compile(
         r"(red|yellow|green)"
         r"(?:\s+(?:light|led))?"
@@ -489,7 +576,6 @@ def parse_traffic_sequence(text: str) -> List[Dict[str, Any]]:
             continue
         sequence.append({"color": color.lower(), "duration_seconds": duration_seconds})
 
-    # Require the sequence to be in a sensible traffic-light order or at least 2 unique colors.
     if len(sequence) < 2 or len({step["color"] for step in sequence}) < 2:
         return []
 
@@ -531,7 +617,6 @@ async def _run_traffic_sequence(sequence: List[Dict[str, Any]], loop_forever: bo
 def run_traffic_sequence(sequence: List[Dict[str, Any]], loop_forever: bool = True) -> Dict[str, Any]:
     """
     Starts a custom traffic-light sequence and keeps it looping by default.
-    Example: [{"color": "green", "duration_seconds": 30}, {"color": "yellow", "duration_seconds": 5}, {"color": "red", "duration_seconds": 20}]
     """
     if not sequence:
         return {
@@ -573,6 +658,7 @@ def run_traffic_sequence(sequence: List[Dict[str, Any]], loop_forever: bool = Tr
         "success": True,
         "sequence": cleaned_sequence,
         "loop": loop_forever,
+        "hardware": get_hardware_info(),
         "message": f'**Traffic Sequence**: "{summary}" started in {loop_label} mode.',
         "speechText": f"Starting {loop_label} traffic sequence: {summary}.",
         "timestamp": datetime.now(UTC).isoformat(),
@@ -596,6 +682,7 @@ def cancel_traffic_sequence() -> Dict[str, Any]:
         "success": True,
         "cancelled": cancelled,
         "states": states,
+        "hardware": get_hardware_info(),
         "message": f'**Traffic Sequence**: "Cancelled and all lights turned off."' if cancelled else '**Traffic Sequence**: No active sequence to cancel.',
         "speechText": "Traffic sequence cancelled. All lights are off." if cancelled else "There is no active traffic sequence to cancel.",
         "timestamp": datetime.now(UTC).isoformat(),

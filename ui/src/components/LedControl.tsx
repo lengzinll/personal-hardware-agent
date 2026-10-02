@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Lightbulb, Power, Radio } from 'lucide-react';
+import { CheckCircle2, Cpu, Lightbulb, Power, Radio, Zap } from 'lucide-react';
 import { useAtomValue } from 'jotai';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -18,26 +18,28 @@ export function LedControl({ onStateChange }: LedControlProps) {
   const ledStates = useAtomValue(ledStatesAtom);
   const isConnected = useAtomValue(ledWebSocketConnectedAtom);
 
-  // Get WebSocket send methods
-  const { sendControlCommand, sendPresetCommand } = useLedWebSocket();
+  // Get WebSocket send methods & hardware diagnostic info
+  const { sendControlCommand, sendPresetCommand, hardwareInfo } = useLedWebSocket();
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleControl = async (color: 'red' | 'yellow' | 'green' | 'all', action: 'ON' | 'OFF' | 'TOGGLE') => {
+  const handleControl = async (color: 'red' | 'yellow' | 'green' | 'lamp' | 'all', action: 'ON' | 'OFF' | 'TOGGLE') => {
     if (!isConnected) {
-      toast.error('Not connected to LED service');
+      toast.error('Not connected to hardware service');
       return;
     }
     setIsLoading(true);
     try {
       const success = await sendControlCommand(color, action);
       if (success) {
-        toast.success(`${color} LED ${action}`);
+        const targetName = color === 'lamp' ? 'Lamp Relay' : `${color.toUpperCase()} LED`;
+        const hwTag = hardwareInfo?.is_hardware_active ? '⚡ [GPIO Pin Verified]' : '📋 [Simulated]';
+        toast.success(`${targetName} ${action} ${hwTag}`);
         if (onStateChange) onStateChange();
       } else {
-        toast.error('Failed to send command');
+        toast.error('Failed to send hardware command');
       }
-    } catch (err) {
-      toast.error('Failed to update LED hardware');
+    } catch {
+      toast.error('Failed to update hardware');
     } finally {
       setIsLoading(false);
     }
@@ -45,7 +47,7 @@ export function LedControl({ onStateChange }: LedControlProps) {
 
   const handlePreset = async (mode: 'red' | 'yellow' | 'green' | 'off' | 'all') => {
     if (!isConnected) {
-      toast.error('Not connected to LED service');
+      toast.error('Not connected to hardware service');
       return;
     }
 
@@ -58,7 +60,7 @@ export function LedControl({ onStateChange }: LedControlProps) {
       } else {
         toast.error('Failed to send preset');
       }
-    } catch (err) {
+    } catch {
       toast.error('Failed to set preset');
     } finally {
       setIsLoading(false);
@@ -68,35 +70,53 @@ export function LedControl({ onStateChange }: LedControlProps) {
   const isRedOn = ledStates.red === 'ON';
   const isYellowOn = ledStates.yellow === 'ON';
   const isGreenOn = ledStates.green === 'ON';
-  const anyOn = isRedOn || isYellowOn || isGreenOn;
+  const isLampOn = ledStates.lamp === 'ON';
+  const anyOn = isRedOn || isYellowOn || isGreenOn || isLampOn;
+
+  const isHwActive = hardwareInfo?.is_hardware_active ?? false;
 
   return (
     <Card className="border-border bg-card/70 backdrop-blur-md overflow-hidden relative shadow-sm">
-      {/* Visual Ambient Glow based on active LEDs */}
+      {/* Visual Ambient Glow based on active outputs */}
       {isRedOn && <div className="absolute -left-12 -top-12 w-48 h-48 bg-rose-500/15 rounded-full blur-3xl pointer-events-none" />}
-      {isYellowOn && <div className="absolute left-1/3 -top-12 w-48 h-48 bg-amber-400/15 rounded-full blur-3xl pointer-events-none" />}
-      {isGreenOn && <div className="absolute -right-12 -top-12 w-48 h-48 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />}
+      {isYellowOn && <div className="absolute left-1/4 -top-12 w-48 h-48 bg-amber-400/15 rounded-full blur-3xl pointer-events-none" />}
+      {isGreenOn && <div className="absolute left-2/4 -top-12 w-48 h-48 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />}
+      {isLampOn && <div className="absolute -right-12 -top-12 w-48 h-48 bg-sky-400/20 rounded-full blur-3xl pointer-events-none" />}
 
-      <CardHeader className="flex flex-row items-center justify-between">
+      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 gap-2">
         <div className="flex items-center gap-2">
           <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 text-primary">
             <Lightbulb className="w-5 h-5" />
           </div>
-          <CardTitle className="text-sm sm:text-base font-semibold">Hardware Controller</CardTitle>
+          <div>
+            <CardTitle className="text-sm sm:text-base font-semibold">Hardware Controller</CardTitle>
+            <p className="text-[11px] text-muted-foreground">Direct GPIO Pin & Relay Diagnostics</p>
+          </div>
+        </div>
+
+        {/* Physical GPIO Hardware Diagnostic Badge */}
+        <div className="flex items-center gap-1.5 self-start sm:self-auto">
+          <div className={`px-2.5 py-1 rounded-full text-[11px] font-mono flex items-center gap-1.5 border ${isHwActive ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/10 text-amber-300 border-amber-500/30'}`}>
+            <Cpu className="w-3 h-3" />
+            <span>{isHwActive ? 'Hardware Active (gpiod)' : 'Simulated GPIO'}</span>
+            {isHwActive && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+          </div>
         </div>
       </CardHeader>
 
       <CardContent className="pt-0 space-y-4">
-        {/* 3 Individual LED Controllers */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {/* RED LED (GPIO 27) */}
+        {/* 4 Hardware Output Controllers (3 Traffic LEDs + 1 Lamp Relay) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* RED LED */}
           <div className={`p-3.5 rounded-xl border transition-all duration-200 ${isRedOn ? 'bg-rose-500/10 border-rose-500/40 shadow-xs' : 'bg-muted/40 border-border'}`}>
             <div className="flex items-center justify-between mb-2.5">
               <div className="flex items-center gap-2">
                 <span className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${isRedOn ? 'bg-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.9)] animate-pulse' : 'bg-rose-950/60 border border-rose-800/40'}`} />
                 <div>
                   <h4 className="text-xs font-bold text-foreground">RED LED</h4>
-                  <span className="text-[10px] text-muted-foreground font-mono">GPIO 27</span>
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    Pin {hardwareInfo?.pins?.red?.board_pin ?? 11} (GPIO {hardwareInfo?.pins?.red?.gpio ?? 17})
+                  </span>
                 </div>
               </div>
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${isRedOn ? 'bg-rose-500/20 text-rose-400 border-rose-500/30' : 'bg-muted text-muted-foreground border-border'}`}>
@@ -117,14 +137,16 @@ export function LedControl({ onStateChange }: LedControlProps) {
             </div>
           </div>
 
-          {/* YELLOW LED (GPIO 22) */}
+          {/* YELLOW LED */}
           <div className={`p-3.5 rounded-xl border transition-all duration-200 ${isYellowOn ? 'bg-amber-500/10 border-amber-500/40 shadow-xs' : 'bg-muted/40 border-border'}`}>
             <div className="flex items-center justify-between mb-2.5">
               <div className="flex items-center gap-2">
                 <span className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${isYellowOn ? 'bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.9)] animate-pulse' : 'bg-amber-950/60 border border-amber-800/40'}`} />
                 <div>
                   <h4 className="text-xs font-bold text-foreground">YELLOW LED</h4>
-                  <span className="text-[10px] text-muted-foreground font-mono">GPIO 22</span>
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    Pin {hardwareInfo?.pins?.yellow?.board_pin ?? 15} (GPIO {hardwareInfo?.pins?.yellow?.gpio ?? 22})
+                  </span>
                 </div>
               </div>
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${isYellowOn ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : 'bg-muted text-muted-foreground border-border'}`}>
@@ -145,14 +167,16 @@ export function LedControl({ onStateChange }: LedControlProps) {
             </div>
           </div>
 
-          {/* GREEN LED (GPIO 23) */}
+          {/* GREEN LED */}
           <div className={`p-3.5 rounded-xl border transition-all duration-200 ${isGreenOn ? 'bg-emerald-500/10 border-emerald-500/40 shadow-xs' : 'bg-muted/40 border-border'}`}>
             <div className="flex items-center justify-between mb-2.5">
               <div className="flex items-center gap-2">
                 <span className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${isGreenOn ? 'bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.9)] animate-pulse' : 'bg-emerald-950/60 border border-emerald-800/40'}`} />
                 <div>
                   <h4 className="text-xs font-bold text-foreground">GREEN LED</h4>
-                  <span className="text-[10px] text-muted-foreground font-mono">GPIO 23</span>
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    Pin {hardwareInfo?.pins?.green?.board_pin ?? 16} (GPIO {hardwareInfo?.pins?.green?.gpio ?? 23})
+                  </span>
                 </div>
               </div>
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${isGreenOn ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-muted text-muted-foreground border-border'}`}>
@@ -169,6 +193,39 @@ export function LedControl({ onStateChange }: LedControlProps) {
               >
                 <Power className="w-3 h-3" />
                 {isGreenOn ? 'Turn OFF' : 'Turn ON'}
+              </Button>
+            </div>
+          </div>
+
+          {/* LAMP RELAY */}
+          <div className={`p-3.5 rounded-xl border transition-all duration-200 ${isLampOn ? 'bg-sky-500/10 border-sky-500/40 shadow-xs' : 'bg-muted/40 border-border'}`}>
+            <div className="flex items-center justify-between mb-2.5">
+              <div className="flex items-center gap-2">
+                <span className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${isLampOn ? 'bg-sky-400 shadow-[0_0_12px_rgba(56,189,248,0.9)] animate-pulse' : 'bg-sky-950/60 border border-sky-800/40'}`} />
+                <div>
+                  <h4 className="text-xs font-bold text-foreground flex items-center gap-1">
+                    <span>LAMP RELAY</span>
+                    <Zap className="w-3 h-3 text-sky-400" />
+                  </h4>
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    Pin {hardwareInfo?.pins?.lamp?.board_pin ?? 13} (GPIO {hardwareInfo?.pins?.lamp?.gpio ?? 27})
+                  </span>
+                </div>
+              </div>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${isLampOn ? 'bg-sky-500/20 text-sky-300 border-sky-500/30' : 'bg-muted text-muted-foreground border-border'}`}>
+                {ledStates.lamp}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant={isLampOn ? 'default' : 'outline'}
+                disabled={isLoading}
+                onClick={() => handleControl('lamp', 'TOGGLE')}
+                className={`w-full text-xs h-7.5 gap-1.5 font-medium ${isLampOn ? 'bg-sky-600 hover:bg-sky-700 text-white border-sky-500' : ''}`}
+              >
+                <Power className="w-3 h-3" />
+                {isLampOn ? 'Turn OFF' : 'Turn ON'}
               </Button>
             </div>
           </div>

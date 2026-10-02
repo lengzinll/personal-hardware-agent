@@ -1,24 +1,28 @@
 'use client';
 
 import { useAtom } from 'jotai';
-import { Bot, Cpu, Zap, Mic, Volume2, VolumeX, MessageSquarePlus, Settings } from 'lucide-react';
-import { engineModeAtom, autoSpeakAtom, showSettingsAtom } from '@/lib/atoms';
+import { Cpu, Zap, MessageSquarePlus } from 'lucide-react';
+import { engineModeAtom, selectedOllamaModelAtom } from '@/lib/atoms';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 interface VoiceAgentHeaderProps {
-  isSpeaking: boolean;
-  stopSpeaking: () => void;
+  ollamaModels: string[];
   clearChatHistory: () => void;
 }
 
 export function VoiceAgentHeader({
-  isSpeaking,
-  stopSpeaking,
+  ollamaModels,
   clearChatHistory,
 }: VoiceAgentHeaderProps) {
   const [engineMode, setEngineMode] = useAtom(engineModeAtom);
-  const [autoSpeak, setAutoSpeak] = useAtom(autoSpeakAtom);
-  const [showSettings, setShowSettings] = useAtom(showSettingsAtom);
+  const [selectedOllamaModel, setSelectedOllamaModel] = useAtom(selectedOllamaModelAtom);
 
   return (
     <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-border bg-card text-card-foreground flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
@@ -32,19 +36,19 @@ export function VoiceAgentHeader({
                 {engineMode === 'ollama' ? 'Ollama' : 'Gemini'}
               </span>
             </div>
-            <p className="text-[11px] sm:text-xs text-muted-foreground">Conversational AI with SQLite Database Tools</p>
+            <p className="text-[11px] sm:text-xs text-muted-foreground">Conversational AI for Hardware & LED Control</p>
           </div>
         </div>
       </div>
 
-      <div className="flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2 overflow-x-auto pb-0.5 sm:pb-0">
+      <div className="flex items-center justify-between sm:justify-end gap-2 overflow-x-auto pb-0.5 sm:pb-0">
         {/* Engine Selector */}
-        <div className="bg-muted p-1 sm:p-1.5 rounded-xl border border-border flex items-center gap-1 shrink-0">
+        <div className="bg-muted p-1 rounded-xl border border-border flex items-center gap-1 shrink-0">
           <Button
             size="xs"
             variant={engineMode === 'ollama' ? 'default' : 'ghost'}
             onClick={() => setEngineMode('ollama')}
-            className="flex items-center gap-1 sm:gap-1.5"
+            className="flex items-center gap-1 sm:gap-1.5 text-xs"
             title="Local Offline Ollama Models"
           >
             <Cpu className="w-3.5 h-3.5 shrink-0" />
@@ -54,63 +58,52 @@ export function VoiceAgentHeader({
             size="xs"
             variant={engineMode === 'text_flash' ? 'default' : 'ghost'}
             onClick={() => setEngineMode('text_flash')}
-            className="flex items-center gap-1 sm:gap-1.5"
+            className="flex items-center gap-1 sm:gap-1.5 text-xs"
+            title="Google Gemini Flash"
           >
             <Zap className="w-3.5 h-3.5 shrink-0" />
             <span>Gemini</span>
           </Button>
-          <Button
-            size="xs"
-            variant={engineMode === 'gemini_live' ? 'default' : 'ghost'}
-            onClick={() => setEngineMode('gemini_live')}
-            className="flex items-center gap-1 sm:gap-1.5"
-          >
-            <Mic className="w-3.5 h-3.5 shrink-0" />
-            <span>Live</span>
-          </Button>
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
-          {/* Auto TTS Speech Response Toggle */}
-          <Button
-            size="icon"
-            variant={autoSpeak ? 'secondary' : 'outline'}
-            onClick={() => setAutoSpeak(!autoSpeak)}
-            title={autoSpeak ? 'Auto Voice Feedback Enabled (TTS)' : 'Auto Voice Feedback Muted'}
-          >
-            {autoSpeak ? <Volume2 className="w-4 h-4 text-primary" /> : <VolumeX className="w-4 h-4 text-muted-foreground" />}
-          </Button>
-
-          {/* Stop Speaking Button when speech is active */}
-          {isSpeaking && (
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={stopSpeaking}
-              className="gap-1.5 animate-pulse"
-              title="Stop current voice playback"
+        {/* Ollama Model Selector dropdown when Ollama is active */}
+        {engineMode === 'ollama' && (
+          <div className="shrink-0 w-36 sm:w-44">
+            <Select
+              value={selectedOllamaModel}
+              onValueChange={(val) => {
+                if (val) setSelectedOllamaModel(val);
+              }}
             >
-              <VolumeX className="w-4 h-4 shrink-0" />
-              <span>Stop</span>
-            </Button>
-          )}
+              <SelectTrigger className="h-7 text-xs">
+                <SelectValue placeholder="Select model..." />
+              </SelectTrigger>
+              <SelectContent>
+                {ollamaModels.length > 0 ? (
+                  ollamaModels.map((model) => (
+                    <SelectItem key={model} value={model} className="text-xs">
+                      {model}
+                    </SelectItem>
+                  ))
+                ) : (
+                  <SelectItem value="ornith-1.5:9b" className="text-xs">
+                    ornith-1.5:9b
+                  </SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
+        <div className="flex items-center gap-1.5 shrink-0">
           <Button
             size="icon"
             variant="outline"
             onClick={clearChatHistory}
             title="New Chat Session"
+            className="h-7 w-7 sm:h-8 sm:w-8"
           >
             <MessageSquarePlus className="w-4 h-4" />
-          </Button>
-
-          <Button
-            size="icon"
-            variant={showSettings ? 'secondary' : 'outline'}
-            onClick={() => setShowSettings((prev) => !prev)}
-            title="Settings"
-          >
-            <Settings className="w-4 h-4" />
           </Button>
         </div>
       </div>

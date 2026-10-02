@@ -16,10 +16,10 @@ class Settings(BaseSettings):
     DB_PATH: str = "agent.sqlite"
 
     GPIO_CHIP: str = "/dev/gpiochip0"
-    RED_PIN: int = 13
+    RED_PIN: int = 11
     YELLOW_PIN: int = 15
     GREEN_PIN: int = 16
-    LAMP_PIN: int = 11
+    LAMP_PIN: int = 13
     LAMP_ACTIVE_LOW: bool = True
 
 
@@ -31,10 +31,3 @@ GEMINI_MODEL = settings.GEMINI_MODEL
 OLLAMA_URL = settings.OLLAMA_URL
 OLLAMA_MODEL = settings.OLLAMA_MODEL
 DB_PATH = settings.DB_PATH
-
-# GPIO_CHIP = settings.GPIO_CHIP
-# RED_PIN = settings.RED_PIN
-# YELLOW_PIN = settings.YELLOW_PIN
-# GREEN_PIN = settings.GREEN_PIN
-# LAMP_PIN = settings.LAMP_PIN
-# LAMP_ACTIVE_LOW = settings.LAMP_ACTIVE_LOW

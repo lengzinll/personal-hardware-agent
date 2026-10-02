@@ -1,7 +1,7 @@
 'use client';
 
 import { RefObject } from 'react';
-import { Bot, User, CheckCircle2, Volume2, VolumeX, Copy, Check } from 'lucide-react';
+import { Bot, User, CheckCircle2, Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ChatMessage } from './types';
@@ -10,11 +10,7 @@ import { Button } from '@/components/ui/button';
 interface ChatMessageListProps {
   messages: ChatMessage[];
   isLoading: boolean;
-  activeSpeakingMsgId: string | null;
-  isSpeaking: boolean;
   copiedId: string | null;
-  speakText: (text: string, msgId?: string) => void;
-  stopSpeaking: () => void;
   copyToClipboard: (text: string, id: string) => void;
   messagesEndRef: RefObject<HTMLDivElement | null>;
 }
@@ -22,11 +18,7 @@ interface ChatMessageListProps {
 export function ChatMessageList({
   messages,
   isLoading,
-  activeSpeakingMsgId,
-  isSpeaking,
   copiedId,
-  speakText,
-  stopSpeaking,
   copyToClipboard,
   messagesEndRef,
 }: ChatMessageListProps) {
@@ -39,20 +31,22 @@ export function ChatMessageList({
         >
           {/* Avatar Icon */}
           <div
-            className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center shrink-0 border border-border ${msg.sender === 'user'
+            className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center shrink-0 border border-border ${
+              msg.sender === 'user'
                 ? 'bg-primary text-primary-foreground'
                 : 'bg-muted text-foreground'
-              }`}
+            }`}
           >
             {msg.sender === 'user' ? <User className="w-4 h-4 sm:w-5 sm:h-5" /> : <Bot className="w-4 h-4 sm:w-5 sm:h-5" />}
           </div>
 
           {/* Bubble */}
           <div
-            className={`max-w-[88%] sm:max-w-[80%] rounded-2xl p-3.5 sm:p-4 border transition-all ${msg.sender === 'user'
+            className={`max-w-[88%] sm:max-w-[80%] rounded-2xl p-3.5 sm:p-4 border transition-all ${
+              msg.sender === 'user'
                 ? 'bg-primary text-primary-foreground border-primary rounded-tr-none'
                 : 'bg-card text-card-foreground border-border rounded-tl-none'
-              }`}
+            }`}
           >
             <div className="flex items-center justify-between gap-4 mb-1.5 pb-1.5 border-b border-border text-[10px] sm:text-xs">
               <span className="font-semibold flex items-center gap-1 truncate">
@@ -107,34 +101,6 @@ export function ChatMessageList({
 
             {/* Toolbar Actions */}
             <div className="mt-2.5 flex items-center justify-end gap-1.5 pt-1.5 border-t border-border">
-              {msg.sender === 'agent' && (
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  onClick={() => {
-                    if (activeSpeakingMsgId === msg.id && isSpeaking) {
-                      stopSpeaking();
-                    } else {
-                      speakText(msg.text, msg.id);
-                    }
-                  }}
-                  className="gap-1 text-[10px] sm:text-xs"
-                  title={activeSpeakingMsgId === msg.id && isSpeaking ? 'Stop speaking this response' : 'Listen to response'}
-                >
-                  {activeSpeakingMsgId === msg.id && isSpeaking ? (
-                    <>
-                      <VolumeX className="w-3.5 h-3.5 text-destructive animate-pulse shrink-0" />
-                      <span>Stop</span>
-                    </>
-                  ) : (
-                    <>
-                      <Volume2 className="w-3.5 h-3.5 shrink-0" />
-                      <span>Listen</span>
-                    </>
-                  )}
-                </Button>
-              )}
-
               <Button
                 size="xs"
                 variant="ghost"
@@ -159,12 +125,15 @@ export function ChatMessageList({
         </div>
       ))}
 
-      {/* Loading Spinner Indicator */}
+      {/* Loading indicator */}
       {isLoading && (
-        <div className="flex items-center gap-3">
-          <div className="bg-card border border-border rounded-2xl rounded-tl-none p-3.5 sm:p-4 text-xs sm:text-sm text-muted-foreground flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-primary animate-ping"></span>
-            AURA is thinking and executing SQLite tool actions...
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center border border-border">
+            <Bot className="w-4 h-4 text-primary animate-pulse" />
+          </div>
+          <div className="bg-card border border-border rounded-2xl rounded-tl-none p-3 text-xs text-muted-foreground flex items-center gap-2">
+            <span className="inline-block w-2 h-2 rounded-full bg-primary animate-ping" />
+            <span>Thinking & processing command...</span>
           </div>
         </div>
       )}

@@ -3,14 +3,52 @@
 import { useCallback } from 'react';
 import { useEffect, useState, useRef } from 'react';
 
-interface LedStates {
+export interface LedStates {
   red: 'ON' | 'OFF';
   yellow: 'ON' | 'OFF';
   green: 'ON' | 'OFF';
+  lamp: 'ON' | 'OFF';
+}
+
+export interface HardwarePinInfo {
+  board_pin?: number;
+  gpio?: number;
+  active_low?: boolean;
+  health?: {
+    last_status?: string;
+    ok?: boolean;
+    verified?: boolean;
+    timestamp?: string;
+  };
+}
+
+export interface HardwareInfo {
+  is_hardware_active: boolean;
+  mode: 'hardware' | 'simulated';
+  gpio_chip: string;
+  error?: string | null;
+  pins?: {
+    red?: HardwarePinInfo;
+    yellow?: HardwarePinInfo;
+    green?: HardwarePinInfo;
+    lamp?: HardwarePinInfo;
+  };
+}
+
+export interface HardwareExecutionResult {
+  success: boolean;
+  mode: 'hardware' | 'simulated';
+  pin?: number;
+  written?: boolean;
+  verified?: boolean;
+  message?: string;
+  error?: string;
 }
 
 interface UseLedWebSocketReturn {
   ledStates: LedStates;
+  hardwareInfo: HardwareInfo | null;
+  lastCommandResult: HardwareExecutionResult | null;
   isConnected: boolean;
   error: string | null;
   sendControlCommand: (color: string, action: string) => Promise<boolean>;
@@ -18,15 +56,18 @@ interface UseLedWebSocketReturn {
 }
 
 /**
- * Custom hook for real-time LED state synchronization via WebSocket.
- * Handles both state updates and command sending over a single persistent connection.
+ * Custom hook for real-time LED & Lamp state synchronization via WebSocket.
+ * Handles state updates, physical pin verification, and command sending.
  */
 export function useLedWebSocket(): UseLedWebSocketReturn {
   const [ledStates, setLedStates] = useState<LedStates>({
     red: 'OFF',
     yellow: 'OFF',
     green: 'OFF',
+    lamp: 'OFF',
   });
+  const [hardwareInfo, setHardwareInfo] = useState<HardwareInfo | null>(null);
+  const [lastCommandResult, setLastCommandResult] = useState<HardwareExecutionResult | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -37,15 +78,19 @@ export function useLedWebSocket(): UseLedWebSocketReturn {
 
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const host = window.location.host;
-      const url = `${protocol}://${host}/ws/led`;
+      // When running on local Next.js (port 3000), connect directly to FastAPI backend on port 8000
+      let wsHost = window.location.host;
+      if (window.location.port === '3000') {
+        wsHost = `${window.location.hostname}:8000`;
+      }
+      const url = process.env.NEXT_PUBLIC_WS_URL || `${protocol}://${wsHost}/ws/led`;
 
       console.log('[LED WebSocket] Connecting to', url);
 
       const ws = new WebSocket(url);
 
       ws.onopen = () => {
-        console.log('[LED WebSocket] Connected');
+        console.log('[LED WebSocket] Connected to', url);
         setIsConnected(true);
         setError(null);
       };
@@ -54,12 +99,17 @@ export function useLedWebSocket(): UseLedWebSocketReturn {
         try {
           const data = JSON.parse(event.data);
 
-          if (data.type === 'led_state' && data.states) {
-            console.log('[LED WebSocket] State update:', data.states);
-            setLedStates(data.states);
+          if (data.type === 'led_state') {
+            if (data.states) {
+              setLedStates(data.states);
+            }
+            if (data.hardware) {
+              setHardwareInfo(data.hardware);
+            }
           } else if (data.type === 'command_response') {
-            console.log('[LED WebSocket] Command response:', data);
-            // State will be updated via the led_state broadcast
+            if (data.payload?.hardware) {
+              setLastCommandResult(data.payload.hardware);
+            }
           } else if (data.type === 'error') {
             console.error('[LED WebSocket] Error:', data.message);
           }
@@ -103,71 +153,96 @@ export function useLedWebSocket(): UseLedWebSocketReturn {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      if (wsRef.current) {
         wsRef.current.close();
       }
     };
   }, [connect]);
 
-  // Send control command via WebSocket
   const sendControlCommand = useCallback(
-    (color: string, action: string): Promise<boolean> => {
-      return new Promise((resolve) => {
-        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-          console.error('[LED WebSocket] Not connected');
-          resolve(false);
-          return;
-        }
-
+    async (color: string, action: string): Promise<boolean> => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        console.warn('[LED WebSocket] Cannot send command, WebSocket not connected. Falling back to HTTP.');
         try {
-          wsRef.current.send(
-            JSON.stringify({
-              type: 'control_led',
-              color,
-              action,
-            })
-          );
-          console.log('[LED WebSocket] Sent control command:', { color, action });
-          resolve(true);
+          const res = await fetch('/api/led', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ color, action }),
+          });
+          const data = await res.json();
+          if (data.states) {
+            setLedStates(data.states);
+          }
+          if (data.hardware) {
+            setLastCommandResult(data.hardware);
+          }
+          return res.ok;
         } catch (err) {
-          console.error('[LED WebSocket] Send error:', err);
-          resolve(false);
+          console.error('[LED WebSocket] HTTP fallback error:', err);
+          return false;
         }
-      });
+      }
+
+      try {
+        const payload =
+          color === 'lamp'
+            ? { action: 'control_lamp', state: action }
+            : { action: 'control_led', color, state: action };
+
+        wsRef.current.send(JSON.stringify(payload));
+        return true;
+      } catch (err) {
+        console.error('[LED WebSocket] Failed to send message:', err);
+        return false;
+      }
     },
     []
   );
 
-  // Send preset command via WebSocket
   const sendPresetCommand = useCallback(
-    (mode: string): Promise<boolean> => {
-      return new Promise((resolve) => {
-        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-          console.error('[LED WebSocket] Not connected');
-          resolve(false);
-          return;
-        }
-
+    async (mode: string): Promise<boolean> => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        console.warn('[LED WebSocket] Cannot send preset, WebSocket not connected. Falling back to HTTP.');
         try {
-          wsRef.current.send(
-            JSON.stringify({
-              type: 'set_traffic_preset',
-              mode,
-            })
-          );
-          console.log('[LED WebSocket] Sent preset command:', { mode });
-          resolve(true);
+          const res = await fetch('/api/led/preset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode }),
+          });
+          const data = await res.json();
+          if (data.states) {
+            setLedStates(data.states);
+          }
+          if (data.hardware) {
+            setLastCommandResult(data.hardware);
+          }
+          return res.ok;
         } catch (err) {
-          console.error('[LED WebSocket] Send error:', err);
-          resolve(false);
+          console.error('[LED WebSocket] HTTP fallback error:', err);
+          return false;
         }
-      });
+      }
+
+      try {
+        wsRef.current.send(
+          JSON.stringify({
+            action: 'traffic_preset',
+            mode,
+          })
+        );
+        return true;
+      } catch (err) {
+        console.error('[LED WebSocket] Failed to send preset message:', err);
+        return false;
+      }
     },
     []
   );
 
   return {
     ledStates,
+    hardwareInfo,
+    lastCommandResult,
     isConnected,
     error,
     sendControlCommand,

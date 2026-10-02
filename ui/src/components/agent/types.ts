@@ -8,4 +8,4 @@ export interface ChatMessage {
   timestamp: string;
 }
 
-export type EngineMode = 'ollama' | 'text_flash' | 'gemini_live' | 'browser_speech';
+export type EngineMode = 'ollama' | 'text_flash';

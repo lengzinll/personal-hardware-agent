@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Bot, Cpu } from 'lucide-react';
+import { Bot, Cpu, Zap } from 'lucide-react';
 import { VoiceAgent } from '@/components/VoiceAgent';
 import { LedControl } from '@/components/LedControl';
 import { useLedState } from '@/lib/LedWebSocketProvider';
@@ -12,6 +12,7 @@ export default function Home() {
   const isRed = ledStates.red === 'ON';
   const isYellow = ledStates.yellow === 'ON';
   const isGreen = ledStates.green === 'ON';
+  const isLamp = ledStates.lamp === 'ON';
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
@@ -29,11 +30,11 @@ export default function Home() {
                   gpiod
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground">Voice & Chat AI Agent for Traffic Light GPIO Controller</p>
+              <p className="text-xs text-muted-foreground">AI Chat Agent for Traffic LEDs & Lamp Relay Controller</p>
             </div>
           </div>
 
-          {/* Backend & Live Traffic LED Status Bar */}
+          {/* Backend & Live Hardware Status Bar */}
           <div className="flex items-center gap-2.5 sm:gap-3">
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-muted/80 border border-border text-xs">
               <Cpu className="w-3.5 h-3.5 text-primary" />
@@ -44,7 +45,7 @@ export default function Home() {
               </span>
             </div>
 
-            {/* 3-LED Pill Indicators */}
+            {/* Hardware Output Status Pill Indicators */}
             <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-muted/80 border border-border">
               <span
                 title="Red LED (GPIO 27)"
@@ -64,6 +65,13 @@ export default function Home() {
                   isGreen ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.9)] animate-pulse' : 'bg-emerald-950/70 border border-emerald-900/50'
                 }`}
               />
+              <div className="w-[1px] h-3 bg-border mx-0.5" />
+              <span
+                title="Lamp Relay (GPIO 17)"
+                className={`w-3 h-3 rounded-full transition-all ${
+                  isLamp ? 'bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.9)] animate-pulse' : 'bg-sky-950/70 border border-sky-900/50'
+                }`}
+              />
             </div>
           </div>
         </div>
@@ -71,11 +79,11 @@ export default function Home() {
 
       {/* Main Content Workspace */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6">
-        {/* LED Traffic Light Hardware Control Card */}
-        <LedControl  />
+        {/* Hardware Control Card */}
+        <LedControl />
 
-        {/* AI Voice & Chat Agent */}
-        <VoiceAgent  />
+        {/* AI Chat Agent */}
+        <VoiceAgent />
       </main>
     </div>
   );
