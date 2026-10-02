@@ -186,8 +186,8 @@ export function useLedWebSocket(): UseLedWebSocketReturn {
       try {
         const payload =
           color === 'lamp'
-            ? { action: 'control_lamp', state: action }
-            : { action: 'control_led', color, state: action };
+            ? { type: 'control_lamp', action: 'control_lamp', state: action }
+            : { type: 'control_led', action: 'control_led', color, state: action };
 
         wsRef.current.send(JSON.stringify(payload));
         return true;
@@ -226,6 +226,7 @@ export function useLedWebSocket(): UseLedWebSocketReturn {
       try {
         wsRef.current.send(
           JSON.stringify({
+            type: 'traffic_preset',
             action: 'traffic_preset',
             mode,
           })
