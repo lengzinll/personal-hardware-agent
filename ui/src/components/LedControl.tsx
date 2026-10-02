@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { CheckCircle2, Cpu, Lightbulb, Power, Radio, Zap } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Bot, CheckCircle2, Cpu, Lightbulb, Power, Radio, Shield, Sparkles, Zap } from 'lucide-react';
 import { useAtomValue } from 'jotai';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,53 @@ export function LedControl({ onStateChange }: LedControlProps) {
   // Get WebSocket send methods & hardware diagnostic info
   const { sendControlCommand, sendPresetCommand, hardwareInfo } = useLedWebSocket();
   const [isLoading, setIsLoading] = useState(false);
+  const [isAutoMode, setIsAutoMode] = useState(false);
+  const [isAutoModeLoading, setIsAutoModeLoading] = useState(false);
+
+  // Fetch initial Auto Mode state from backend
+  useEffect(() => {
+    const fetchAutoMode = async () => {
+      try {
+        const res = await fetch('/api/led/lamp/auto');
+        if (res.ok) {
+          const data = await res.json();
+          if (typeof data.auto_mode === 'boolean') {
+            setIsAutoMode(data.auto_mode);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch lamp auto mode:', err);
+      }
+    };
+    fetchAutoMode();
+  }, []);
+
+  const handleToggleAutoMode = async () => {
+    setIsAutoModeLoading(true);
+    try {
+      const targetVal = !isAutoMode;
+      const res = await fetch('/api/led/lamp/auto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: targetVal }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setIsAutoMode(data.auto_mode);
+        if (data.auto_mode) {
+          toast.success('🤖 Lamp Auto Mode ENABLED: Automated triggers active');
+        } else {
+          toast.info('🔒 Lamp Auto Mode DISABLED: Only AI Agent / Manual commands allowed');
+        }
+      } else {
+        toast.error('Failed to toggle Auto Mode');
+      }
+    } catch {
+      toast.error('Error connecting to backend for Auto Mode');
+    } finally {
+      setIsAutoModeLoading(false);
+    }
+  };
 
   const handleControl = async (color: 'red' | 'yellow' | 'green' | 'lamp' | 'all', action: 'ON' | 'OFF' | 'TOGGLE') => {
     if (!isConnected) {
@@ -216,17 +263,39 @@ export function LedControl({ onStateChange }: LedControlProps) {
                 {ledStates.lamp}
               </span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <Button
-                size="sm"
-                variant={isLampOn ? 'default' : 'outline'}
-                disabled={isLoading}
-                onClick={() => handleControl('lamp', 'TOGGLE')}
-                className={`w-full text-xs h-7.5 gap-1.5 font-medium ${isLampOn ? 'bg-sky-600 hover:bg-sky-700 text-white border-sky-500' : ''}`}
+
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <Button
+                  size="sm"
+                  variant={isLampOn ? 'default' : 'outline'}
+                  disabled={isLoading}
+                  onClick={() => handleControl('lamp', 'TOGGLE')}
+                  className={`w-full text-xs h-7.5 gap-1.5 font-medium ${isLampOn ? 'bg-sky-600 hover:bg-sky-700 text-white border-sky-500' : ''}`}
+                >
+                  <Power className="w-3 h-3" />
+                  {isLampOn ? 'Turn OFF' : 'Turn ON'}
+                </Button>
+              </div>
+
+              {/* Lamp Auto Mode Toggle Badge */}
+              <button
+                type="button"
+                onClick={handleToggleAutoMode}
+                disabled={isAutoModeLoading}
+                title={isAutoMode ? 'Automated triggers (YOLO / endpoints) can switch lamp. Click to disable.' : 'Auto mode is OFF. Only AI Agent or manual clicks can control lamp. Click to enable.'}
+                className={`w-full text-[10px] font-mono py-1 px-2 rounded-lg flex items-center justify-between border transition-colors ${
+                  isAutoMode
+                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/25'
+                    : 'bg-muted/80 text-muted-foreground border-border hover:bg-muted'
+                }`}
               >
-                <Power className="w-3 h-3" />
-                {isLampOn ? 'Turn OFF' : 'Turn ON'}
-              </Button>
+                <div className="flex items-center gap-1">
+                  {isAutoMode ? <Bot className="w-3 h-3 text-emerald-400" /> : <Shield className="w-3 h-3 text-muted-foreground" />}
+                  <span>Auto Mode</span>
+                </div>
+                <span className="font-bold">{isAutoMode ? 'ACTIVE' : 'OFF (AI-ONLY)'}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -267,35 +336,19 @@ export function LedControl({ onStateChange }: LedControlProps) {
             </Button>
           </div>
 
-          {/* Master All ON / All OFF Buttons */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <Button
-              size="xs"
-              variant="secondary"
-              disabled={isLoading || !anyOn}
-              onClick={() => handleControl('all', 'OFF')}
-              className="text-[11px] h-6 px-2.5"
-            >
-              All OFF
-            </Button>
-            <Button
-              size="xs"
-              variant="default"
-              disabled={isLoading}
-              onClick={() => handleControl('all', 'ON')}
-              className="text-[11px] h-6 px-2.5"
-            >
-              All ON
-            </Button>
-            <Button
-              size="xs"
-              variant="outline"
-              disabled={isLoading}
-              onClick={() => handleControl('all', 'TOGGLE')}
-              className="text-[11px] h-6 px-2"
-            >
-              Toggle All
-            </Button>
+          {/* Master Turn OFF All */}
+          <div className="flex items-center gap-1.5 self-end sm:self-auto">
+            {anyOn && (
+              <Button
+                size="xs"
+                variant="destructive"
+                disabled={isLoading}
+                onClick={() => handlePreset('off')}
+                className="text-[11px] h-6 px-2.5 font-medium gap-1"
+              >
+                <Power className="w-3 h-3" /> Turn All OFF
+              </Button>
+            )}
           </div>
         </div>
       </CardContent>
