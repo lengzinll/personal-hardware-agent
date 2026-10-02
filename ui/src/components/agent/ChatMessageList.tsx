@@ -1,11 +1,14 @@
 'use client';
 
 import { RefObject } from 'react';
-import { Bot, User, CheckCircle2, Copy, Check } from 'lucide-react';
+import { Bot, User, CheckCircle2, Copy, Check, Volume2, Square } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useAtom } from 'jotai';
 import { ChatMessage } from './types';
 import { Button } from '@/components/ui/button';
+import { ttsSpeakingIdAtom } from '@/lib/atoms';
+import { playBackendTTS, stopTTS } from '@/lib/tts';
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
@@ -22,6 +25,25 @@ export function ChatMessageList({
   copyToClipboard,
   messagesEndRef,
 }: ChatMessageListProps) {
+  const [speakingId, setSpeakingId] = useAtom(ttsSpeakingIdAtom);
+
+  const handlePlayVoice = (msgId: string, text: string) => {
+    if (speakingId === msgId) {
+      stopTTS();
+      setSpeakingId(null);
+      return;
+    }
+
+    setSpeakingId(msgId);
+    playBackendTTS(
+      text,
+      'en-US-JennyNeural',
+      undefined,
+      () => setSpeakingId(null),
+      () => setSpeakingId(null)
+    );
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
       {messages.map((msg) => (
@@ -101,6 +123,28 @@ export function ChatMessageList({
 
             {/* Toolbar Actions */}
             <div className="mt-2.5 flex items-center justify-end gap-1.5 pt-1.5 border-t border-border">
+              {msg.sender === 'agent' && (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => handlePlayVoice(msg.id, msg.text)}
+                  className="gap-1 text-[10px] sm:text-xs"
+                  title={speakingId === msg.id ? 'Stop Speaking' : 'Listen with Neural Voice'}
+                >
+                  {speakingId === msg.id ? (
+                    <>
+                      <Square className="w-3 h-3 text-rose-400 fill-current shrink-0" />
+                      <span className="text-rose-400">Stop</span>
+                    </>
+                  ) : (
+                    <>
+                      <Volume2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                      <span>Listen</span>
+                    </>
+                  )}
+                </Button>
+              )}
+
               <Button
                 size="xs"
                 variant="ghost"

@@ -5,6 +5,10 @@ export const engineModeAtom = atom<EngineMode>('ollama');
 export const selectedOllamaModelAtom = atom<string>('ornith-1.5:9b');
 export const apiKeyAtom = atom<string>(process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? '');
 
+// TTS Atoms
+export const ttsEnabledAtom = atom<boolean>(true);
+export const ttsSpeakingIdAtom = atom<string | null>(null);
+
 // LED & Lamp State Atoms (Global)
 export interface LedStates {
   red: 'ON' | 'OFF';

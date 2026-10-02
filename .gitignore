@@ -17,6 +17,8 @@ venv/
 env/
 
 backend/agent.sqlite
+backend/agent.sqlite-shm
+backend/agent.sqlite-wal
 
 .pytest_cache/
 .mypy_cache/

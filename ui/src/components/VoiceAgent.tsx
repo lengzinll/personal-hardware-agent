@@ -11,7 +11,10 @@ import {
   engineModeAtom,
   selectedOllamaModelAtom,
   apiKeyAtom,
+  ttsEnabledAtom,
+  ttsSpeakingIdAtom,
 } from '@/lib/atoms';
+import { playBackendTTS, stopTTS } from '@/lib/tts';
 
 interface VoiceAgentProps {
   onRefreshData?: () => void;
@@ -22,6 +25,8 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
   const engineMode = useAtomValue(engineModeAtom);
   const [selectedOllamaModel, setSelectedOllamaModel] = useAtom(selectedOllamaModelAtom);
   const apiKey = useAtomValue(apiKeyAtom);
+  const ttsEnabled = useAtomValue(ttsEnabledAtom);
+  const [, setSpeakingId] = useAtom(ttsSpeakingIdAtom);
 
   // Local Component State
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
@@ -33,7 +38,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
     {
       id: 'welcome',
       sender: 'agent',
-      text: "Hello! I'm AURA, your AI Hardware Agent. You can send commands to control the LED lights (e.g., 'Turn on red light', 'Turn off all lights', or 'Traffic sequence: green 10s then yellow 3s then red 5s').",
+      text: "Hello! I'm AURA, your AI Hardware Agent. You can send commands to control the LED lights and Lamp relay (e.g., 'Turn on lamp', 'Turn on red light', or 'Traffic sequence: green 10s then yellow 3s then red 5s').",
       timestamp: 'Just now',
       modelUsed: 'AURA Agent Engine',
     },
@@ -73,6 +78,10 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
     const textToSend = msgText || inputText;
     if (!textToSend.trim() || isLoading) return;
 
+    // Stop any existing TTS speech when user sends a new message
+    stopTTS();
+    setSpeakingId(null);
+
     const userText = textToSend.trim();
     const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -111,10 +120,11 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
       const data = await res.json();
       const modelDisplayName = engineMode === 'ollama' ? `Ollama (${selectedOllamaModel})` : 'Gemini Flash';
       const replyText = data.response || data.reply || data.text || 'No response text returned.';
+      const agentMsgId = (Date.now() + 1).toString();
 
       if (data.success) {
         const agentMsg: ChatMessage = {
-          id: (Date.now() + 1).toString(),
+          id: agentMsgId,
           sender: 'agent',
           text: replyText,
           actionTaken: data.actionTaken,
@@ -125,21 +135,45 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
 
         setMessages((prev) => [...prev, agentMsg]);
 
+        // Auto-play TTS if enabled
+        if (ttsEnabled && replyText) {
+          setSpeakingId(agentMsgId);
+          playBackendTTS(
+            replyText,
+            'en-US-JennyNeural',
+            undefined,
+            () => setSpeakingId(null),
+            () => setSpeakingId(null)
+          );
+        }
+
         if (data.actionTaken && !['ollama_chat_response', 'chat_response', 'general_command_processed'].includes(data.actionTaken)) {
           showSuccessToast('⚡ Action Executed', `Executed ${data.actionTaken} successfully.`);
           if (onRefreshData) onRefreshData();
         }
       } else {
+        const errorMsgText = `⚠️ ${data.error || 'Failed to process command. Make sure Ollama is running or Gemini API Key is set.'}`;
         const errorMsg: ChatMessage = {
-          id: (Date.now() + 1).toString(),
+          id: agentMsgId,
           sender: 'agent',
-          text: `⚠️ ${data.error || 'Failed to process command. Make sure Ollama is running or Gemini API Key is set.'}`,
+          text: errorMsgText,
           modelUsed: modelDisplayName,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
         setMessages((prev) => [...prev, errorMsg]);
+
+        if (ttsEnabled) {
+          setSpeakingId(agentMsgId);
+          playBackendTTS(
+            errorMsgText,
+            'en-US-JennyNeural',
+            undefined,
+            () => setSpeakingId(null),
+            () => setSpeakingId(null)
+          );
+        }
       }
-    } catch (err: any) {
+    } catch {
       const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         sender: 'agent',
@@ -160,6 +194,8 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
   };
 
   const handleClearHistory = () => {
+    stopTTS();
+    setSpeakingId(null);
     setMessages([
       {
         id: 'welcome_reset',
