@@ -4,6 +4,9 @@ from typing import List, Dict, Any, Optional
 from config import DB_PATH
 
 def get_connection() -> sqlite3.Connection:
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
