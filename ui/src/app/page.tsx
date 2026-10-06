@@ -1,9 +1,10 @@
 'use client';
 
 import React from 'react';
-import { Bot, Cpu } from 'lucide-react';
+import { Bot, Cpu, Radio, Shield, Terminal, Zap, Activity } from 'lucide-react';
 import { VoiceAgent } from '@/components/VoiceAgent';
 import { LedControl } from '@/components/LedControl';
+import { SciFiHudDecorations } from '@/components/SciFiHudDecorations';
 import { useLedState } from '@/lib/LedWebSocketProvider';
 
 export default function Home() {
@@ -15,61 +16,66 @@ export default function Home() {
   const isLamp = ledStates.lamp === 'ON';
 
   return (
-    <div className="h-screen max-h-screen overflow-hidden flex flex-col bg-background text-foreground">
-      {/* Top Header Navbar (Pinned) */}
-      <header className="shrink-0 border-b border-border bg-card/80 backdrop-blur-md z-40">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 sm:py-3 flex flex-col sm:flex-row items-center justify-between gap-2.5 sm:gap-4">
-          <div className="flex items-center gap-2.5 sm:gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+    <div className="h-screen max-h-screen overflow-hidden flex flex-col hud-grid-bg hud-scanline text-[#00f0ff] font-mono selection:bg-cyan-500/30 selection:text-white">
+      {/* Top Holographic Header Ribbon */}
+      <header className="shrink-0 border-b border-cyan-500/30 bg-[#020b18]/90 backdrop-blur-md z-40 px-3 sm:px-6 py-2">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+          {/* Logo & Terminal Identity */}
+          <div className="flex items-center gap-2.5">
+            <div className="relative w-8 h-8 rounded-xs bg-cyan-950/80 border border-cyan-400 flex items-center justify-center text-cyan-300 shadow-[0_0_12px_rgba(0,240,255,0.6)]">
               <Bot className="w-5 h-5" />
+              <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg font-bold tracking-tight">AURA Hardware Agent</h1>
-                <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-primary/10 text-primary border border-primary/20">
-                  gpiod
+                <h1 className="text-sm sm:text-base font-bold tracking-widest font-heading text-cyan-300 hud-glow-cyan">
+                NEURAL_HUD_V4.9
+                </h1>
+                <span className="px-1.5 py-0.2 text-[9px] font-bold bg-cyan-500/20 text-cyan-200 border border-cyan-400/40 rounded-xs">
+                  LIBGPIOD_ACTIVE
                 </span>
               </div>
-              <p className="text-[11px] sm:text-xs text-muted-foreground">AI Chat Agent for Traffic LEDs & Lamp Relay Controller</p>
+              <p className="text-[10px] text-cyan-500/80 tracking-wider">CYBERNETIC HARDWARE & VOICE SYNAPSE CONTROLLER</p>
             </div>
           </div>
 
-          {/* Backend & Live Hardware Status Bar */}
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-muted/80 border border-border text-xs">
-              <Cpu className="w-3.5 h-3.5 text-primary" />
-              <span className="text-muted-foreground font-mono hidden sm:inline">Backend:</span>
-              <span className="font-semibold flex items-center gap-1.5 text-[11px] sm:text-xs">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                FastAPI
+          {/* Realtime Status Bar & Hardware Indicators */}
+          <div className="flex items-center gap-2">
+            {/* Server Status */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xs bg-cyan-950/60 border border-cyan-500/30 text-[11px]">
+              <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="text-cyan-500 hidden sm:inline">FASTAPI_DAEMON:</span>
+              <span className="font-bold flex items-center gap-1 text-emerald-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_#10b981]" />
+                ONLINE
               </span>
             </div>
 
-            {/* Hardware Output Status Pill Indicators */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-muted/80 border border-border">
+            {/* Actuator State Indicators */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xs bg-cyan-950/60 border border-cyan-500/30">
               <span
-                title="Red LED (GPIO 17)"
-                className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full transition-all ${
-                  isRed ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.9)] animate-pulse' : 'bg-rose-950/70 border border-rose-900/50'
+                title="RED BEACON (GPIO 17)"
+                className={`w-2.5 h-2.5 rounded-xs transition-all ${
+                  isRed ? 'bg-rose-500 shadow-[0_0_10px_#f43f5e] animate-pulse' : 'bg-rose-950 border border-rose-900/60'
                 }`}
               />
               <span
-                title="Yellow LED (GPIO 22)"
-                className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full transition-all ${
-                  isYellow ? 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)] animate-pulse' : 'bg-amber-950/70 border border-amber-900/50'
+                title="YELLOW BEACON (GPIO 22)"
+                className={`w-2.5 h-2.5 rounded-xs transition-all ${
+                  isYellow ? 'bg-amber-400 shadow-[0_0_10px_#fbbf24] animate-pulse' : 'bg-amber-950 border border-amber-900/60'
                 }`}
               />
               <span
-                title="Green LED (GPIO 23)"
-                className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full transition-all ${
-                  isGreen ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.9)] animate-pulse' : 'bg-emerald-950/70 border border-emerald-900/50'
+                title="GREEN BEACON (GPIO 23)"
+                className={`w-2.5 h-2.5 rounded-xs transition-all ${
+                  isGreen ? 'bg-emerald-400 shadow-[0_0_10px_#10b981] animate-pulse' : 'bg-emerald-950 border border-emerald-900/60'
                 }`}
               />
-              <div className="w-[1px] h-3 bg-border mx-0.5" />
+              <div className="w-[1px] h-3 bg-cyan-500/30 mx-0.5" />
               <span
-                title="Lamp Relay (GPIO 27)"
-                className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full transition-all ${
-                  isLamp ? 'bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.9)] animate-pulse' : 'bg-sky-950/70 border border-sky-900/50'
+                title="LAMP RELAY (GPIO 27)"
+                className={`w-2.5 h-2.5 rounded-xs transition-all ${
+                  isLamp ? 'bg-cyan-400 shadow-[0_0_10px_#00f0ff] animate-pulse' : 'bg-cyan-950 border border-cyan-900/60'
                 }`}
               />
             </div>
@@ -77,14 +83,19 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Main Container - Strictly fills viewport with zero outer scroll */}
-      <main className="flex-1 min-h-0 overflow-hidden flex flex-col max-w-6xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-4 gap-3 sm:gap-4">
-        {/* Hardware Control Card (Fixed Height, Pinned) */}
+      {/* Main Container */}
+      <main className="flex-1 min-h-0 overflow-hidden flex flex-col max-w-7xl w-full mx-auto px-2 sm:px-4 py-2 sm:py-3 gap-2 sm:gap-3">
+        {/* Sci-Fi HUD Telemetry Ribbon */}
+        <div className="shrink-0">
+          <SciFiHudDecorations />
+        </div>
+
+        {/* Hardware Control Matrix (Pinned) */}
         <div className="shrink-0">
           <LedControl />
         </div>
 
-        {/* AI Chat Agent (Takes 100% of remaining space with internal chat scroll) */}
+        {/* AI Chat Agent (Full remaining viewport height) */}
         <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
           <VoiceAgent />
         </div>

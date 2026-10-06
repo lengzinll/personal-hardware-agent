@@ -1,9 +1,20 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Orbitron, Share_Tech_Mono, Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { LedWebSocketProvider } from "@/lib/LedWebSocketProvider";
 import "./globals.css";
+
+const orbitron = Orbitron({
+  variable: "--font-orbitron",
+  subsets: ["latin"],
+});
+
+const shareTechMono = Share_Tech_Mono({
+  weight: "400",
+  variable: "--font-share-tech-mono",
+  subsets: ["latin"],
+});
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -16,23 +27,23 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AURA - Personal AI",
-  description: "AI Voice & Agent with MCP Tools",
+  title: "AURA - Neural Hardware HUD",
+  description: "Futuristic Sci-Fi Holographic Hardware Interface",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
-      className={`dark ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`dark ${orbitron.variable} ${shareTechMono.variable} ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full flex flex-col bg-[#020710] text-[#00f0ff] font-mono selection:bg-[#00f0ff]/30 selection:text-[#ffffff]">
         <QueryProvider>
           <LedWebSocketProvider>
             {children}
           </LedWebSocketProvider>
         </QueryProvider>
-        <Toaster position="top-right" richColors closeButton />
+        <Toaster position="top-right" theme="dark" richColors closeButton />
       </body>
     </html>
   );

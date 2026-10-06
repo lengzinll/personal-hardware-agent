@@ -36,9 +36,9 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
     {
       id: 'welcome',
       sender: 'agent',
-      text: "Hello! I'm AURA, your AI Hardware Agent. You can send commands to control the LED lights and Lamp relay (e.g., 'Turn on lamp', 'Turn on red light', or 'Traffic sequence: green 10s then yellow 3s then red 5s').",
-      timestamp: 'Just now',
-      modelUsed: 'AURA Agent Engine',
+      text: "SYSTEM INITIALIZED: AURA Neural Interface Online. Ready to process voice & text hardware commands (e.g., 'Turn on lamp', 'Turn on red light', 'Run traffic cycle green 10s yellow 3s red 5s').",
+      timestamp: 'SYS_BOOT',
+      modelUsed: 'AURA_SYNAPSE_CORE',
     },
   ]);
 
@@ -62,12 +62,6 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
       .catch(() => { });
   }, [setSelectedOllamaModel]);
 
-  const showSuccessToast = (title: string, message: string) => {
-    toast.success(title, {
-      description: message,
-    });
-  };
-
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
@@ -81,7 +75,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
     setSpeakingId(null);
 
     const userText = textToSend.trim();
-    const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -115,7 +109,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
       });
 
       const data = await res.json();
-      const modelDisplayName = engineMode === 'ollama' ? `Ollama (${selectedOllamaModel})` : 'Gemini Flash';
+      const modelDisplayName = engineMode === 'ollama' ? `OLLAMA:${selectedOllamaModel}` : 'GEMINI_FLASH';
       const replyText = data.response || data.reply || data.text || 'No response text returned.';
       const agentMsgId = (Date.now() + 1).toString();
 
@@ -127,7 +121,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
           actionTaken: data.actionTaken,
           toolPayload: data.toolPayload || data.payload,
           modelUsed: modelDisplayName,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         };
 
         setMessages((prev) => [...prev, agentMsg]);
@@ -141,7 +135,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
         }
 
         if (data.actionTaken) {
-          showSuccessToast('Hardware Action Executed', replyText);
+          toast.success('⚡ HARDWARE_COMMITTED', { description: replyText });
           if (onRefreshData) onRefreshData();
         }
       } else {
@@ -149,23 +143,23 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
         const errorAgentMsg: ChatMessage = {
           id: agentMsgId,
           sender: 'agent',
-          text: `⚠️ **Error**: ${errMsg}`,
+          text: `⚠️ **EXECUTION_ERROR**: ${errMsg}`,
           modelUsed: modelDisplayName,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         };
         setMessages((prev) => [...prev, errorAgentMsg]);
-        toast.error('Command Execution Failed', { description: errMsg });
+        toast.error('COMMAND_FAILED', { description: errMsg });
       }
     } catch (err: any) {
       const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         sender: 'agent',
-        text: `⚠️ **Connection Error**: ${err.message || 'Could not reach backend service'}`,
-        modelUsed: 'Network Error',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        text: `⚠️ **COMMUNICATION_LINK_FAILURE**: ${err.message || 'Host offline'}`,
+        modelUsed: 'BUS_ERROR',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       };
       setMessages((prev) => [...prev, errorMsg]);
-      toast.error('Failed to communicate with Agent Backend');
+      toast.error('LINK_OFFLINE');
     } finally {
       setIsLoading(false);
     }
@@ -174,7 +168,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
   const handleCopyMessage = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
-    toast.success('Copied to clipboard');
+    toast.success('BUFFER_COPIED');
     setTimeout(() => setCopiedId(null), 2000);
   };
 
@@ -185,16 +179,16 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
       {
         id: 'welcome_reset',
         sender: 'agent',
-        text: "Chat cleared! How can I assist with your hardware today?",
+        text: "LOGS PURGED. Neural registers clear.",
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        modelUsed: 'AURA Agent Engine',
+        modelUsed: 'AURA_SYNAPSE_CORE',
       },
     ]);
-    toast.info('Conversation history cleared');
+    toast.info('BUFFER_PURGED');
   };
 
   return (
-    <div className="flex flex-col flex-1 h-full min-h-0 bg-card/60 backdrop-blur-md rounded-2xl border border-border overflow-hidden shadow-xs">
+    <div className="hud-panel flex flex-col flex-1 h-full min-h-0 rounded-sm overflow-hidden">
       {/* Header */}
       <div className="shrink-0">
         <VoiceAgentHeader
@@ -203,7 +197,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
         />
       </div>
 
-      {/* Message Stream with Scrollbar */}
+      {/* Message Stream */}
       <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
         <ChatMessageList
           messages={messages}

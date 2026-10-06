@@ -1,12 +1,11 @@
 'use client';
 
 import { RefObject } from 'react';
-import { Bot, User, CheckCircle2, Copy, Check, Volume2, Square } from 'lucide-react';
+import { Bot, User, CheckCircle2, Copy, Check, Volume2, Square, Terminal, ShieldAlert } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAtom } from 'jotai';
 import { ChatMessage } from './types';
-import { Button } from '@/components/ui/button';
 import { ttsSpeakingIdAtom } from '@/lib/atoms';
 import { playBackendTTS, stopTTS } from '@/lib/tts';
 
@@ -45,80 +44,82 @@ export function ChatMessageList({
   };
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
+    <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3 font-mono">
       {messages.map((msg) => (
         <div
           key={msg.id}
-          className={`flex items-start gap-2.5 sm:gap-3 ${msg.sender === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
+          className={`flex items-start gap-2.5 ${msg.sender === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
         >
-          {/* Avatar Icon */}
+          {/* Avatar Tag */}
           <div
-            className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center shrink-0 border border-border ${
+            className={`w-7 h-7 rounded-xs flex items-center justify-center shrink-0 border text-xs font-bold ${
               msg.sender === 'user'
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-foreground'
+                ? 'bg-cyan-500/20 text-cyan-200 border-cyan-400 shadow-[0_0_8px_rgba(0,240,255,0.4)]'
+                : 'bg-cyan-950/80 text-cyan-300 border-cyan-500/50 shadow-[0_0_8px_rgba(0,240,255,0.2)]'
             }`}
           >
-            {msg.sender === 'user' ? <User className="w-4 h-4 sm:w-5 sm:h-5" /> : <Bot className="w-4 h-4 sm:w-5 sm:h-5" />}
+            {msg.sender === 'user' ? 'USR' : 'AI'}
           </div>
 
-          {/* Bubble */}
+          {/* Holographic Chat Bubble */}
           <div
-            className={`max-w-[88%] sm:max-w-[80%] rounded-2xl p-3.5 sm:p-4 border transition-all ${
+            className={`max-w-[90%] sm:max-w-[85%] rounded-xs p-3 border transition-all text-xs relative ${
               msg.sender === 'user'
-                ? 'bg-primary text-primary-foreground border-primary rounded-tr-none'
-                : 'bg-card text-card-foreground border-border rounded-tl-none'
+                ? 'bg-cyan-950/60 text-cyan-100 border-cyan-500/60 shadow-[0_0_10px_rgba(0,240,255,0.15)]'
+                : 'bg-slate-950/80 text-cyan-200 border-cyan-500/30'
             }`}
           >
-            <div className="flex items-center justify-between gap-4 mb-1.5 pb-1.5 border-b border-border text-[10px] sm:text-xs">
-              <span className="font-semibold flex items-center gap-1 truncate">
-                {msg.sender === 'user' ? 'You' : 'AURA Agent'}
+            {/* Header Line */}
+            <div className="flex items-center justify-between gap-4 mb-1.5 pb-1 border-b border-cyan-500/20 text-[10px]">
+              <span className="font-bold flex items-center gap-1.5 text-cyan-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                {msg.sender === 'user' ? 'OPERATOR_TRANSMISSION' : 'AURA_SYNAPSE_CORE'}
                 {msg.modelUsed && (
-                  <span className="text-[9px] sm:text-[10px] text-muted-foreground font-mono hidden sm:inline">({msg.modelUsed})</span>
+                  <span className="text-[9px] text-cyan-500/80 font-mono hidden sm:inline">[{msg.modelUsed}]</span>
                 )}
               </span>
-              <span className="text-muted-foreground font-mono text-[9px] sm:text-[10px] shrink-0">{msg.timestamp}</span>
+              <span className="text-cyan-500/80 text-[9px]">{msg.timestamp}</span>
             </div>
 
-            {/* Message Content */}
-            <div className="prose prose-xs sm:prose-sm max-w-full overflow-x-auto leading-relaxed wrap-break-word">
+            {/* Markdown Text */}
+            <div className="prose prose-invert max-w-full leading-relaxed break-words text-cyan-100 text-xs">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
                   table: ({ children }) => (
-                    <div className="my-3 overflow-x-auto rounded-lg border border-border bg-card shadow-xs">
-                      <table className="w-full text-left text-xs border-collapse divide-y divide-border">{children}</table>
+                    <div className="my-2 overflow-x-auto rounded-xs border border-cyan-500/40 bg-cyan-950/40">
+                      <table className="w-full text-left text-[11px] border-collapse divide-y divide-cyan-500/30">{children}</table>
                     </div>
                   ),
                   thead: ({ children }) => (
-                    <thead className="bg-muted/80 text-muted-foreground uppercase font-semibold text-[11px] tracking-wider">{children}</thead>
+                    <thead className="bg-cyan-900/40 text-cyan-300 uppercase font-semibold text-[10px] tracking-wider">{children}</thead>
                   ),
                   tbody: ({ children }) => (
-                    <tbody className="divide-y divide-border bg-card/50">{children}</tbody>
+                    <tbody className="divide-y divide-cyan-500/20 bg-slate-950/40">{children}</tbody>
                   ),
                   tr: ({ children }) => (
-                    <tr className="hover:bg-muted/30 transition-colors">{children}</tr>
+                    <tr className="hover:bg-cyan-500/10 transition-colors">{children}</tr>
                   ),
                   th: ({ children }) => (
-                    <th className="px-3 py-2 text-[11px] font-semibold text-foreground/80">{children}</th>
+                    <th className="px-2 py-1.5 text-[10px] font-semibold text-cyan-200">{children}</th>
                   ),
                   td: ({ children }) => (
-                    <td className="px-3 py-2 text-foreground/90 font-mono text-[11px]">{children}</td>
+                    <td className="px-2 py-1.5 text-cyan-100 font-mono text-[10px]">{children}</td>
                   ),
                   p: ({ children }) => (
-                    <p className="mb-2 last:mb-0">{children}</p>
+                    <p className="mb-1.5 last:mb-0 leading-normal">{children}</p>
                   ),
                   ul: ({ children }) => (
-                    <ul className="list-disc pl-4 mb-2 space-y-1">{children}</ul>
+                    <ul className="list-disc pl-4 mb-1.5 space-y-0.5 text-cyan-200">{children}</ul>
                   ),
                   ol: ({ children }) => (
-                    <ol className="list-decimal pl-4 mb-2 space-y-1">{children}</ol>
+                    <ol className="list-decimal pl-4 mb-1.5 space-y-0.5 text-cyan-200">{children}</ol>
                   ),
                   li: ({ children }) => (
                     <li className="text-inherit">{children}</li>
                   ),
                   code: ({ children }) => (
-                    <code className="px-1.5 py-0.5 rounded bg-muted font-mono text-[11px] text-primary">{children}</code>
+                    <code className="px-1 py-0.5 rounded-xs bg-cyan-950 border border-cyan-500/40 font-mono text-[10px] text-cyan-300">{children}</code>
                   ),
                 }}
               >
@@ -126,45 +127,43 @@ export function ChatMessageList({
               </ReactMarkdown>
             </div>
 
-            {/* Hardware Action Pill */}
+            {/* Hardware State Execution Pill */}
             {msg.actionTaken && (
-              <div className="mt-2.5 pt-2 border-t border-border/80 flex items-center justify-between text-[11px]">
-                <div className="flex items-center gap-1 text-emerald-400 font-medium">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Hardware State Applied</span>
+              <div className="mt-2 pt-1.5 border-t border-cyan-500/30 flex items-center justify-between text-[10px]">
+                <div className="flex items-center gap-1.5 text-emerald-300 font-bold">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400 animate-pulse" />
+                  <span>HARDWARE_REGISTERS_UPDATED</span>
                 </div>
               </div>
             )}
 
             {/* Action Bar */}
-            <div className="mt-2 pt-1.5 flex items-center justify-end gap-1 border-t border-border/40 text-muted-foreground">
-              {/* Play Audio Button */}
+            <div className="mt-1.5 pt-1 flex items-center justify-end gap-1.5 border-t border-cyan-500/20 text-cyan-500">
               <button
                 type="button"
                 onClick={() => handlePlayVoice(msg.id, msg.text)}
-                title={speakingId === msg.id ? "Stop voice" : "Read message aloud"}
-                className={`p-1.5 rounded-lg hover:bg-muted/80 transition-colors ${
-                  speakingId === msg.id ? "text-primary bg-primary/10" : ""
+                title={speakingId === msg.id ? "HALT_SYNTH_VOICE" : "READ_AUDIO_TRANSMISSION"}
+                className={`p-1 rounded-xs hover:bg-cyan-500/20 hover:text-cyan-200 transition-colors ${
+                  speakingId === msg.id ? "text-cyan-300 bg-cyan-500/30" : ""
                 }`}
               >
                 {speakingId === msg.id ? (
-                  <Square className="w-3.5 h-3.5 fill-current animate-pulse" />
+                  <Square className="w-3 h-3 fill-current animate-pulse text-cyan-400" />
                 ) : (
-                  <Volume2 className="w-3.5 h-3.5" />
+                  <Volume2 className="w-3 h-3" />
                 )}
               </button>
 
-              {/* Copy text button */}
               <button
                 type="button"
                 onClick={() => copyToClipboard(msg.text, msg.id)}
-                title="Copy text"
-                className="p-1.5 rounded-lg hover:bg-muted/80 transition-colors"
+                title="COPY_PAYLOAD"
+                className="p-1 rounded-xs hover:bg-cyan-500/20 hover:text-cyan-200 transition-colors"
               >
                 {copiedId === msg.id ? (
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <Check className="w-3 h-3 text-emerald-400" />
                 ) : (
-                  <Copy className="w-3.5 h-3.5" />
+                  <Copy className="w-3 h-3" />
                 )}
               </button>
             </div>
@@ -172,20 +171,19 @@ export function ChatMessageList({
         </div>
       ))}
 
-      {/* Loading indicator */}
+      {/* Loading telemetry indicator */}
       {isLoading && (
-        <div className="flex items-start gap-2.5 sm:gap-3">
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-muted border border-border flex items-center justify-center shrink-0">
-            <Bot className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground animate-pulse" />
+        <div className="flex items-start gap-2.5">
+          <div className="w-7 h-7 rounded-xs bg-cyan-950/80 border border-cyan-500/50 flex items-center justify-center shrink-0 text-cyan-300 text-xs font-bold animate-pulse">
+            AI
           </div>
-          <div className="bg-card border border-border rounded-2xl rounded-tl-none p-3.5 sm:p-4 text-xs text-muted-foreground flex items-center gap-2 shadow-xs">
-            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-ping" />
-            <span>AURA is reasoning & contacting hardware...</span>
+          <div className="bg-slate-950/90 border border-cyan-500/50 rounded-xs p-2.5 text-[11px] text-cyan-300 flex items-center gap-2 shadow-[0_0_12px_rgba(0,240,255,0.2)]">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+            <span className="tracking-wider">SYNAPSE_PROCESSING_HARDWARE_SIGNAL...</span>
           </div>
         </div>
       )}
 
-      {/* Auto-scroll target */}
       <div ref={messagesEndRef} />
     </div>
   );
