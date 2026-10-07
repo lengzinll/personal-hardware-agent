@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from database import init_db
+from services.led_tool import control_leds, control_lamp
 from routers import led, system, agent, websocket, tts
 
 @asynccontextmanager
@@ -18,6 +19,14 @@ async def lifespan(app: FastAPI):
     # Startup: Initialize SQLite database
     init_db()
     yield
+    # Shutdown: Turn off all lights and lamp before the API exits
+    try:
+        control_leds(color="all", action="OFF")
+        control_lamp(action="OFF", force=True, source="manual")
+        print("[Shutdown] All LEDs and lamp turned OFF.")
+    except Exception as exc:
+        print(f"[Shutdown] Failed to turn off all lights: {exc}")
+
 
 app = FastAPI(
     title="AURA Personal Agent API",

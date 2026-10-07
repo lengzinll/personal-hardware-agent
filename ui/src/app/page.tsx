@@ -4,7 +4,6 @@ import React from 'react';
 import { Bot, Cpu, Radio, Shield, Terminal, Zap, Activity } from 'lucide-react';
 import { VoiceAgent } from '@/components/VoiceAgent';
 import { LedControl } from '@/components/LedControl';
-import { SciFiHudDecorations } from '@/components/SciFiHudDecorations';
 import { useLedState } from '@/lib/LedWebSocketProvider';
 
 export default function Home() {
@@ -85,10 +84,6 @@ export default function Home() {
 
       {/* Main Container */}
       <main className="flex-1 min-h-0 overflow-hidden flex flex-col max-w-7xl w-full mx-auto px-2 sm:px-4 py-2 sm:py-3 gap-2 sm:gap-3">
-        {/* Sci-Fi HUD Telemetry Ribbon */}
-        <div className="shrink-0">
-          <SciFiHudDecorations />
-        </div>
 
         {/* Hardware Control Matrix (Pinned) */}
         <div className="shrink-0">
