@@ -1,11 +1,14 @@
 import re
 import io
 import asyncio
+import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 import edge_tts
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tts", tags=["TTS"])
 
@@ -104,15 +107,25 @@ def clean_markdown_for_speech(text: str) -> str:
     return clean
 
 
-async def generate_speech_stream(text: str, voice: str, rate: str = "+0%", pitch: str = "+0Hz"):
-    clean_text = clean_markdown_for_speech(text)
-    if not clean_text:
-        return
+async def synthesize_audio_bytes(clean_text: str, voice: str, rate: str = "+0%", pitch: str = "+0Hz", max_retries: int = 2) -> bytes:
+    """Synthesize speech with retry logic for intermittent DNS/network glitches."""
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            communicate = edge_tts.Communicate(clean_text, voice=voice, rate=rate, pitch=pitch)
+            audio_buffer = bytearray()
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_buffer.extend(chunk["data"])
+            if audio_buffer:
+                return bytes(audio_buffer)
+        except Exception as e:
+            last_error = e
+            logger.warning(f"[TTS Synthesis Attempt {attempt}/{max_retries} failed]: {e}")
+            if attempt < max_retries:
+                await asyncio.sleep(0.3)
 
-    communicate = edge_tts.Communicate(clean_text, voice=voice, rate=rate, pitch=pitch)
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            yield chunk["data"]
+    raise last_error or RuntimeError("TTS audio generation returned empty buffer")
 
 
 @router.get("/voices")
@@ -131,14 +144,23 @@ async def synthesize_speech_post(req: TTSRequest):
     rate = req.rate or "+0%"
     pitch = req.pitch or "+0Hz"
 
-    return StreamingResponse(
-        generate_speech_stream(req.text, voice=voice, rate=rate, pitch=pitch),
-        media_type="audio/mpeg",
-        headers={
-            "Content-Disposition": "inline; filename=speech.mp3",
-            "Cache-Control": "no-cache",
-        },
-    )
+    clean_text = clean_markdown_for_speech(req.text)
+    if not clean_text:
+        raise HTTPException(status_code=400, detail="Cleaned text is empty")
+
+    try:
+        audio_data = await synthesize_audio_bytes(clean_text, voice=voice, rate=rate, pitch=pitch)
+        return Response(
+            content=audio_data,
+            media_type="audio/mpeg",
+            headers={
+                "Content-Disposition": "inline; filename=speech.mp3",
+                "Cache-Control": "no-cache",
+            },
+        )
+    except Exception as err:
+        logger.error(f"[TTS Server Error]: {err}")
+        raise HTTPException(status_code=502, detail=f"TTS synthesis failed: {str(err)}")
 
 
 @router.get("")
@@ -151,11 +173,20 @@ async def synthesize_speech_get(
     if not text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
 
-    return StreamingResponse(
-        generate_speech_stream(text, voice=voice or DEFAULT_VOICE, rate=rate or "+0%"),
-        media_type="audio/mpeg",
-        headers={
-            "Content-Disposition": "inline; filename=speech.mp3",
-            "Cache-Control": "no-cache",
-        },
-    )
+    clean_text = clean_markdown_for_speech(text)
+    if not clean_text:
+        raise HTTPException(status_code=400, detail="Cleaned text is empty")
+
+    try:
+        audio_data = await synthesize_audio_bytes(clean_text, voice=voice or DEFAULT_VOICE, rate=rate or "+0%")
+        return Response(
+            content=audio_data,
+            media_type="audio/mpeg",
+            headers={
+                "Content-Disposition": "inline; filename=speech.mp3",
+                "Cache-Control": "no-cache",
+            },
+        )
+    except Exception as err:
+        logger.error(f"[TTS Server Error]: {err}")
+        raise HTTPException(status_code=502, detail=f"TTS synthesis failed: {str(err)}")

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TTS Test</title>
+</head>
+
+<body>
+  <h1>Text to Speech Test</h1>
+
+  <textarea id="text" rows="5" cols="50">
+Hello! This is a test of Chrome's text to speech.
+  </textarea>
+
+  <br /><br />
+
+  <button id="speak">🔊 Speak</button>
+  <button id="stop">⏹ Stop</button>
+
+  <script>
+    const text = document.getElementById("text");
+
+    document.getElementById("speak").onclick = () => {
+      speechSynthesis.cancel();
+
+      const utterance = new SpeechSynthesisUtterance(text.value);
+
+      utterance.lang = "en-UK";
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      utterance.volume = 1;
+
+      speechSynthesis.speak(utterance);
+    };
+
+    document.getElementById("stop").onclick = () => {
+      speechSynthesis.cancel();
+    };
+  </script>
+</body>
+</html>
