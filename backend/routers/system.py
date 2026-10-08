@@ -17,6 +17,8 @@ def read_logs(limit: int = 50):
     return {"success": True, "data": logs}
 
 @router.get("/ollama/models")
+@router.get("/system/ollama-models")
+@router.get("/system/ollama/models")
 async def read_ollama_models():
     models = await get_ollama_models()
     return {"success": True, "models": models}

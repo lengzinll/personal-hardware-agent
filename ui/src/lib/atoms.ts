@@ -24,3 +24,19 @@ export const ledStatesAtom = atom<LedStates>({
 });
 
 export const ledWebSocketConnectedAtom = atom<boolean>(false);
+
+// Realtime Voice & Wake Word Conversation Atoms
+export type RealtimeSessionState =
+  | 'uninitialized'
+  | 'standby'        // Silently listening for wake word "Hello Johnwick"
+  | 'session_active' // Session active, listening for commands
+  | 'recording'      // Actively recording audio buffer to WAV
+  | 'processing'     // Uploading WAV & running AI
+  | 'speaking'       // AI is answering (barge-in interruptible)
+  | 'muted';
+
+export const realtimeEnabledAtom = atom<boolean>(true);
+export const realtimeSessionStateAtom = atom<RealtimeSessionState>('standby');
+export const realtimeVolumeAtom = atom<number>(0);
+export const wakeWordAtom = atom<string>('Hello Johnwick');
+export const lastHeardTranscriptAtom = atom<string>('');

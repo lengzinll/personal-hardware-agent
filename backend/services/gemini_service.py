@@ -5,7 +5,7 @@ from google.genai import types
 from config import GEMINI_MODEL
 from services.led_tool import control_leds, get_led_status, set_traffic_preset, control_leds_timed, parse_duration, run_traffic_sequence, cancel_traffic_sequence, control_lamp
 
-AURA_TOOLS = types.Tool(
+JOHNWICK_TOOLS = types.Tool(
     function_declarations=[
         types.FunctionDeclaration(
             name="control_led",
@@ -123,7 +123,7 @@ AURA_TOOLS = types.Tool(
     ]
 )
 
-SYSTEM_INSTRUCTION = """You are AURA, an intelligent AI Copilot connected directly to a Traffic Light hardware controller (Red on GPIO 27, Yellow on GPIO 22, Green on GPIO 23) and a relay-controlled lamp on GPIO 17.
+SYSTEM_INSTRUCTION = """You are Johnwick, an intelligent AI Copilot connected directly to a Traffic Light hardware controller (Red on GPIO 27, Yellow on GPIO 22, Green on GPIO 23) and a relay-controlled lamp on GPIO 17.
 
 Available Tools:
 - control_led(color, state): Controls 'red', 'yellow', 'green', or 'all' LEDs with state 'ON' | 'OFF' | 'TOGGLE'.
@@ -144,6 +144,115 @@ Instructions:
 7. When asked to run a custom traffic sequence, call run_traffic_sequence with the sequence details.
 8. When asked to cancel a traffic sequence, call cancel_traffic_sequence.
 9. Be concise, direct, and conversational."""
+
+def _execute_function_calls(function_calls: List[Any]) -> tuple[str, Any, List[types.Part]]:
+    executed_action = "chat_response"
+    tool_results: Any = None
+    tool_content_parts: List[types.Part] = []
+
+    for call in function_calls:
+        call_name = call.name
+        args = call.args or {}
+
+        if call_name == "control_led":
+            color = str(args.get("color", "all")).lower()
+            state = str(args.get("state", "ON")).upper()
+            status = control_leds(color=color, action=state)  # type: ignore
+            executed_action = f"led_{color}_{state.lower()}"
+            tool_results = status
+
+            tool_content_parts.append(
+                types.Part.from_function_response(
+                    name=call_name,
+                    response={"result": status},
+                )
+            )
+        elif call_name == "control_lamp":
+            state = str(args.get("state", "TOGGLE")).upper()
+            status = control_lamp(action=state)  # type: ignore
+            executed_action = f"lamp_{state.lower()}"
+            tool_results = status
+
+            tool_content_parts.append(
+                types.Part.from_function_response(
+                    name=call_name,
+                    response={"result": status},
+                )
+            )
+        elif call_name == "control_led_timed":
+            color = str(args.get("color", "all")).lower()
+            duration_str = str(args.get("duration", "0s"))
+            duration_seconds = parse_duration(duration_str)
+
+            status = control_leds_timed(color=color, action="ON", duration_seconds=duration_seconds)
+            executed_action = f"led_{color}_timed_{duration_seconds}s"
+            tool_results = status
+
+            tool_content_parts.append(
+                types.Part.from_function_response(
+                    name=call_name,
+                    response={"result": status},
+                )
+            )
+        elif call_name == "set_traffic_preset":
+            mode = str(args.get("mode", "off")).lower()
+            status = set_traffic_preset(mode)  # type: ignore
+            executed_action = f"traffic_preset_{mode}"
+            tool_results = status
+
+            tool_content_parts.append(
+                types.Part.from_function_response(
+                    name=call_name,
+                    response={"result": status},
+                )
+            )
+        elif call_name == "get_led_status":
+            status = get_led_status()
+            executed_action = "led_status_checked"
+            tool_results = status
+
+            tool_content_parts.append(
+                types.Part.from_function_response(
+                    name=call_name,
+                    response={"result": status},
+                )
+            )
+        elif call_name == "run_traffic_sequence":
+            sequence_raw = args.get("sequence") or []
+            parsed_sequence = []
+            if isinstance(sequence_raw, list):
+                for step in sequence_raw:
+                    if not isinstance(step, dict):
+                        continue
+                    color = str(step.get("color", "")).lower()
+                    duration_str = str(step.get("duration", "0s")).strip()
+                    duration_seconds = parse_duration(duration_str)
+                    if color in {"red", "yellow", "green"} and duration_seconds > 0:
+                        parsed_sequence.append({"color": color, "duration_seconds": duration_seconds})
+
+            status = run_traffic_sequence(parsed_sequence) if parsed_sequence else {"success": False, "message": "No valid traffic sequence steps provided."}
+            executed_action = "traffic_sequence"
+            tool_results = status
+
+            tool_content_parts.append(
+                types.Part.from_function_response(
+                    name=call_name,
+                    response={"result": status},
+                )
+            )
+        elif call_name == "cancel_traffic_sequence":
+            status = cancel_traffic_sequence()
+            executed_action = "traffic_sequence_cancelled"
+            tool_results = status
+
+            tool_content_parts.append(
+                types.Part.from_function_response(
+                    name=call_name,
+                    response={"result": status},
+                )
+            )
+
+    return executed_action, tool_results, tool_content_parts
 
 async def process_gemini_command(
     input_text: str,
@@ -178,7 +287,7 @@ async def process_gemini_command(
     )
 
     config = types.GenerateContentConfig(
-        tools=[AURA_TOOLS],
+        tools=[JOHNWICK_TOOLS],
         system_instruction=SYSTEM_INSTRUCTION,
         temperature=0.1,
     )
@@ -194,109 +303,7 @@ async def process_gemini_command(
     final_text_parts: List[str] = []
 
     if response.function_calls:
-        tool_content_parts: List[types.Part] = []
-
-        for call in response.function_calls:
-            call_name = call.name
-            args = call.args or {}
-
-            if call_name == "control_led":
-                color = str(args.get("color", "all")).lower()
-                state = str(args.get("state", "ON")).upper()
-                status = control_leds(color=color, action=state)  # type: ignore
-                executed_action = f"led_{color}_{state.lower()}"
-                tool_results = status
-
-                tool_content_parts.append(
-                    types.Part.from_function_response(
-                        name=call_name,
-                        response={"result": status},
-                    )
-                )
-            elif call_name == "control_lamp":
-                state = str(args.get("state", "TOGGLE")).upper()
-                status = control_lamp(action=state)  # type: ignore
-                executed_action = f"lamp_{state.lower()}"
-                tool_results = status
-
-                tool_content_parts.append(
-                    types.Part.from_function_response(
-                        name=call_name,
-                        response={"result": status},
-                    )
-                )
-            elif call_name == "control_led_timed":
-                color = str(args.get("color", "all")).lower()
-                duration_str = str(args.get("duration", "0s"))
-                duration_seconds = parse_duration(duration_str)
-
-                status = control_leds_timed(color=color, action="ON", duration_seconds=duration_seconds)
-                executed_action = f"led_{color}_timed_{duration_seconds}s"
-                tool_results = status
-
-                tool_content_parts.append(
-                    types.Part.from_function_response(
-                        name=call_name,
-                        response={"result": status},
-                    )
-                )
-            elif call_name == "set_traffic_preset":
-                mode = str(args.get("mode", "off")).lower()
-                status = set_traffic_preset(mode)  # type: ignore
-                executed_action = f"traffic_preset_{mode}"
-                tool_results = status
-
-                tool_content_parts.append(
-                    types.Part.from_function_response(
-                        name=call_name,
-                        response={"result": status},
-                    )
-                )
-            elif call_name == "get_led_status":
-                status = get_led_status()
-                executed_action = "led_status_checked"
-                tool_results = status
-
-                tool_content_parts.append(
-                    types.Part.from_function_response(
-                        name=call_name,
-                        response={"result": status},
-                    )
-                )
-            elif call_name == "run_traffic_sequence":
-                sequence_raw = args.get("sequence") or []
-                parsed_sequence = []
-                if isinstance(sequence_raw, list):
-                    for step in sequence_raw:
-                        if not isinstance(step, dict):
-                            continue
-                        color = str(step.get("color", "")).lower()
-                        duration_str = str(step.get("duration", "0s")).strip()
-                        duration_seconds = parse_duration(duration_str)
-                        if color in {"red", "yellow", "green"} and duration_seconds > 0:
-                            parsed_sequence.append({"color": color, "duration_seconds": duration_seconds})
-
-                status = run_traffic_sequence(parsed_sequence) if parsed_sequence else {"success": False, "message": "No valid traffic sequence steps provided."}
-                executed_action = "traffic_sequence"
-                tool_results = status
-
-                tool_content_parts.append(
-                    types.Part.from_function_response(
-                        name=call_name,
-                        response={"result": status},
-                    )
-                )
-            elif call_name == "cancel_traffic_sequence":
-                status = cancel_traffic_sequence()
-                executed_action = "traffic_sequence_cancelled"
-                tool_results = status
-
-                tool_content_parts.append(
-                    types.Part.from_function_response(
-                        name=call_name,
-                        response={"result": status},
-                    )
-                )
+        executed_action, tool_results, tool_content_parts = _execute_function_calls(response.function_calls)
 
         # Send tool output back to model for conversational response
         followup_contents = list(contents)
@@ -332,5 +339,102 @@ async def process_gemini_command(
         "actionTaken": executed_action,
         "payload": tool_results,
         "model": model,
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
+
+
+async def process_gemini_audio_command(
+    audio_bytes: bytes,
+    api_key: str,
+    model_name: Optional[str] = None,
+    history: Optional[List[Dict[str, str]]] = None,
+    mime_type: str = "audio/wav",
+) -> Dict[str, Any]:
+    """
+    Directly processes native audio stream/WAV file with Gemini Multimodal Audio
+    and executes appropriate hardware tools.
+    """
+    client = genai.Client(api_key=api_key.strip())
+    model = model_name or GEMINI_MODEL
+
+    contents: List[types.Content] = []
+
+    # Add conversational history if provided
+    if history:
+        for msg in history:
+            role = msg.get("role")
+            content = msg.get("content")
+            if role in ("user", "model") and content:
+                contents.append(
+                    types.Content(
+                        role=role,
+                        parts=[types.Part.from_text(text=content)],
+                    )
+                )
+
+    # Append the user's native audio input
+    contents.append(
+        types.Content(
+            role="user",
+            parts=[
+                types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+                types.Part.from_text(
+                    text="Listen to this user audio recording. Execute any requested hardware commands (LEDs, traffic lights, lamp) via available tools and reply with a brief, clear conversational response."
+                ),
+            ],
+        )
+    )
+
+    config = types.GenerateContentConfig(
+        tools=[JOHNWICK_TOOLS],
+        system_instruction=SYSTEM_INSTRUCTION,
+        temperature=0.1,
+    )
+
+    response = client.models.generate_content(
+        model=model,
+        contents=contents,
+        config=config,
+    )
+
+    executed_action = "voice_audio_response"
+    tool_results: Any = None
+    final_text_parts: List[str] = []
+
+    if response.function_calls:
+        executed_action, tool_results, tool_content_parts = _execute_function_calls(response.function_calls)
+
+        followup_contents = list(contents)
+        if response.candidates and response.candidates[0].content:
+            followup_contents.append(response.candidates[0].content)
+
+        followup_contents.append(
+            types.Content(
+                role="user",
+                parts=tool_content_parts,
+            )
+        )
+
+        followup_response = client.models.generate_content(
+            model=model,
+            contents=followup_contents,
+            config=config,
+        )
+
+        if followup_response.text:
+            final_text_parts.append(followup_response.text)
+    elif response.text:
+        final_text_parts.append(response.text)
+
+    response_text = " ".join(final_text_parts).strip()
+    if not response_text and tool_results and isinstance(tool_results, dict):
+        response_text = tool_results.get("speechText") or tool_results.get("message") or "Action executed."
+
+    return {
+        "success": True,
+        "response": response_text,
+        "actionTaken": executed_action,
+        "payload": tool_results,
+        "model": f"Gemini Audio ({model})",
         "timestamp": datetime.now(UTC).isoformat(),
     }

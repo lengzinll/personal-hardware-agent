@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { Orbitron, Share_Tech_Mono, Geist, Geist_Mono } from "next/font/google";
-import { Toaster } from "sonner";
+import "./globals.css";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { LedWebSocketProvider } from "@/lib/LedWebSocketProvider";
-import "./globals.css";
+import { Toaster } from "sonner";
 
 const orbitron = Orbitron({
   variable: "--font-orbitron",
@@ -27,7 +27,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AURA - Neural Hardware HUD",
+  title: "Johnwick - Neural Hardware HUD",
   description: "Futuristic Sci-Fi Holographic Hardware Interface",
 };
 

@@ -28,13 +28,13 @@ export default function Home() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-sm sm:text-base font-bold tracking-widest font-heading text-cyan-300 hud-glow-cyan">
-                NEURAL_HUD_V4.9
+                  JOHNWICK_NEURAL_HUD
                 </h1>
                 <span className="px-1.5 py-0.2 text-[9px] font-bold bg-cyan-500/20 text-cyan-200 border border-cyan-400/40 rounded-xs">
                   LIBGPIOD_ACTIVE
                 </span>
               </div>
-              <p className="text-[10px] text-cyan-500/80 tracking-wider">CYBERNETIC HARDWARE & VOICE SYNAPSE CONTROLLER</p>
+              <p className="text-[10px] text-cyan-500/80 tracking-wider">JOHNWICK CYBERNETIC HARDWARE & VOICE SYNAPSE</p>
             </div>
           </div>
 

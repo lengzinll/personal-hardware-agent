@@ -1,10 +1,10 @@
 module.exports = {
   apps: [
     {
-      name: "aura-backend",
+      name: "johnwickjohnwick-backend",
       cwd: "./backend",
       script: "uv",
-      args: "run fastapi run",
+      args: "run fastapi run --host 0.0.0.0 --port 8000",
       interpreter: "none",
       autorestart: true,
       watch: false,
@@ -13,7 +13,7 @@ module.exports = {
       max_restarts: 10,
     },
     {
-      name: "aura-frontend",
+      name: "johnwickjohnwick-frontend",
       cwd: "./ui",
       script: "bun",
       args: "run start",

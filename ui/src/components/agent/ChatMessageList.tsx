@@ -73,16 +73,15 @@ export function ChatMessageList({
             <div className="flex items-center justify-between gap-4 mb-1.5 pb-1 border-b border-cyan-500/20 text-[10px]">
               <span className="font-bold flex items-center gap-1.5 text-cyan-300">
                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-                {msg.sender === 'user' ? 'OPERATOR_TRANSMISSION' : 'AURA_SYNAPSE_CORE'}
+                {msg.sender === 'user' ? 'OPERATOR_TRANSMISSION' : 'JOHNWICK_SYNAPSE_CORE'}
                 {msg.modelUsed && (
-                  <span className="text-[9px] text-cyan-500/80 font-mono hidden sm:inline">[{msg.modelUsed}]</span>
+                  <span className="text-xs text-cyan-500/80 font-mono hidden sm:inline">[{msg.modelUsed}]</span>
                 )}
               </span>
-              <span className="text-cyan-500/80 text-[9px]">{msg.timestamp}</span>
             </div>
 
             {/* Markdown Text */}
-            <div className="prose prose-invert max-w-full leading-relaxed break-words text-cyan-100 text-xs">
+            <div className="prose prose-invert max-w-full leading-relaxed wrap-break-word text-cyan-100 text-xs">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
@@ -179,7 +178,7 @@ export function ChatMessageList({
           </div>
           <div className="bg-slate-950/90 border border-cyan-500/50 rounded-xs p-2.5 text-[11px] text-cyan-300 flex items-center gap-2 shadow-[0_0_12px_rgba(0,240,255,0.2)]">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-            <span className="tracking-wider">SYNAPSE_PROCESSING_HARDWARE_SIGNAL...</span>
+            <span className="tracking-wider">SYNAPSE_PROCESSING...</span>
           </div>
         </div>
       )}

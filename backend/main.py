@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from database import init_db
 from services.led_tool import control_leds, control_lamp
-from routers import led, system, agent, websocket, tts
+from routers import led, system, agent, websocket, tts, realtime
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -29,8 +29,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="AURA Personal Agent API",
-    description="FastAPI backend for AURA AI Agent and LED Hardware Control",
+    title="Johnwick Personal Agent API",
+    description="FastAPI backend for Johnwick AI Agent and LED Hardware Control",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -50,11 +50,12 @@ app.include_router(system.router)
 app.include_router(agent.router)
 app.include_router(websocket.router)
 app.include_router(tts.router)
+app.include_router(realtime.router)
 
 @app.get("/")
 def root():
     return {
         "status": "online",
-        "service": "AURA LED Agent API",
+        "service": "Johnwick LED Agent API",
         "docs": "/docs",
     }

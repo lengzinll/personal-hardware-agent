@@ -43,7 +43,7 @@ export function VoiceAgentHeader({
           <div>
             <div className="flex items-center gap-2">
               <h3 className="font-bold text-cyan-300 text-xs sm:text-sm font-heading tracking-wider hud-glow-cyan">
-                AURA_NEURAL_COMMAND
+                JOHNWICK
               </h3>
               <span className="px-1.5 py-0.2 rounded-xs bg-cyan-500/20 border border-cyan-400/40 text-[9px] text-cyan-200 font-bold uppercase tracking-wider flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_6px_#00f0ff]" />

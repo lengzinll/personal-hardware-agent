@@ -292,6 +292,7 @@ def set_lamp_state(action: ActionType) -> tuple[str, Dict[str, Any]]:
 
 def control_lamp(
     action: ActionType = "TOGGLE",
+    state: Optional[str] = None,
     force: bool = False,
     source: Literal["manual", "agent", "auto"] = "manual",
 ) -> Dict[str, Any]:
@@ -302,6 +303,7 @@ def control_lamp(
     - If force == True or source in ("manual", "agent"):
       control is always permitted for user UI actions and AI Agent commands.
     """
+    effective_action: ActionType = (state or action).upper()  # type: ignore
     auto_mode = get_lamp_auto_mode()
     current = get_lamp_state()
 
@@ -319,10 +321,10 @@ def control_lamp(
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
-    if action == "TOGGLE":
+    if effective_action == "TOGGLE":
         target_state = "OFF" if current == "ON" else "ON"
     else:
-        target_state = action.upper()
+        target_state = effective_action
         if target_state not in ("ON", "OFF"):
             target_state = "ON"
 
@@ -373,24 +375,26 @@ def set_single_led(color: Literal["red", "yellow", "green"], action: ActionType)
 
 def control_leds(
     color: ColorType = "all",
-    action: ActionType = "TOGGLE"
+    action: ActionType = "TOGGLE",
+    state: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Controls a specific LED (red, yellow, green, lamp) or all LEDs at the same time.
     """
+    effective_action: ActionType = (state or action).upper()  # type: ignore
     color_clean = color.lower()
     if color_clean == "lamp":
-        return control_lamp(action, force=True, source="manual")
+        return control_lamp(effective_action, force=True, source="manual")
 
     if color_clean not in ("red", "yellow", "green", "all"):
         color_clean = "all"
 
     if color_clean == "all":
         current_states = get_all_led_states()
-        if action == "TOGGLE":
+        if effective_action == "TOGGLE":
             target_state: ActionType = "OFF" if any(v == "ON" for v in current_states.values()) else "ON"
         else:
-            target_state = action
+            target_state = effective_action
 
         hw_results = {}
         for c in ["red", "yellow", "green"]:
@@ -413,7 +417,7 @@ def control_leds(
             "timestamp": datetime.now(UTC).isoformat(),
         }
     else:
-        new_state, hw_result = set_single_led(color_clean, action)  # type: ignore
+        new_state, hw_result = set_single_led(color_clean, effective_action)  # type: ignore
         new_states = get_all_led_states()
         speech_text = f"The {color_clean} light is now {new_state}"
         msg = f'**{color_clean.capitalize()} LED**: "{speech_text}"'
@@ -454,9 +458,28 @@ def parse_duration(text: str) -> Optional[int]:
     return int(val)
 
 
-def parse_traffic_sequence(text: str) -> Optional[Dict[str, Any]]:
+def parse_traffic_sequence(text: str) -> Optional[List[Dict[str, Any]]]:
     """
-    Parses natural language requests for traffic light sequences/cycles.
+    Parses natural language sequence with color and duration.
+    e.g. "traffic cycle green 10s yellow 3s red 5s", "run green 5s then red 10s".
+    """
+    lower = text.lower()
+    step_pattern = r'\b(red|yellow|green)\b(?:\s+(?:for|in))?\s+(\d+(?:\.\d+)?\s*(?:s|sec|second|seconds|m|min|minute|minutes)?)'
+    matches = re.findall(step_pattern, lower)
+    if len(matches) >= 2:
+        steps = []
+        for color, dur_str in matches:
+            duration = parse_duration(dur_str)
+            if duration and duration > 0:
+                steps.append({"color": color, "duration_seconds": duration})
+        if len(steps) >= 2:
+            return steps
+    return None
+
+
+def parse_traffic_command(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Parses a human string to see if it specifies a repetitive traffic light sequence.
     e.g. 'cycle traffic light', 'run traffic sequence 5 times', 'start traffic light pattern'.
     """
     lower = text.lower()
@@ -472,20 +495,29 @@ def parse_traffic_sequence(text: str) -> Optional[Dict[str, Any]]:
 def control_leds_timed(
     color: ColorType = "all",
     action: ActionType = "ON",
-    duration_seconds: int = 5,
+    state: Optional[str] = None,
+    duration: Optional[str] = None,
+    duration_seconds: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Turns an LED (or lamp/all) ON immediately, and schedules an automatic turn OFF after duration_seconds.
     """
+    effective_action: ActionType = (state or action).upper()  # type: ignore
+    resolved_duration = duration_seconds
+    if resolved_duration is None and duration:
+        resolved_duration = parse_duration(duration)
+    if not resolved_duration or resolved_duration <= 0:
+        resolved_duration = 5
+
     timer_key = color.lower()
     if timer_key in _active_timers:
         _active_timers[timer_key].cancel()
 
-    res = control_leds(color=color, action=action)
+    res = control_leds(color=color, action=effective_action)
 
     async def _auto_off_task():
         try:
-            await asyncio.sleep(duration_seconds)
+            await asyncio.sleep(resolved_duration)
             control_leds(color=color, action="OFF")
         except asyncio.CancelledError:
             pass
@@ -498,19 +530,46 @@ def control_leds_timed(
     except RuntimeError:
         pass
 
-    speech_text = f"Turned {color} {action} for {duration_seconds} seconds"
+    speech_text = f"Turned {color} {effective_action} for {resolved_duration} seconds"
     res["speechText"] = speech_text
     res["message"] = f'**Timed Action**: "{speech_text}"'
-    res["duration"] = duration_seconds
+    res["duration"] = resolved_duration
     return res
 
 
 def run_traffic_sequence(
-    sequence_or_cycles: Union[Dict[str, Any], int] = 3,
+    sequence_or_cycles: Union[List[Dict[str, Any]], Dict[str, Any], int] = 3,
     interval: float = 2.0,
 ) -> Dict[str, Any]:
-    """Starts an automated traffic light cycle (Red -> Yellow -> Green)."""
+    """Starts an automated traffic light cycle."""
     cancel_traffic_sequence()
+
+    if isinstance(sequence_or_cycles, list):
+        # Custom sequence list of steps with color & duration_seconds
+        steps = sequence_or_cycles
+
+        async def _custom_sequence_worker():
+            try:
+                for step in steps:
+                    col = step.get("color", "red")
+                    dur = step.get("duration_seconds") or parse_duration(step.get("duration", "2s")) or 2
+                    set_traffic_preset(col)
+                    await asyncio.sleep(dur)
+                set_traffic_preset("off")
+            except asyncio.CancelledError:
+                set_traffic_preset("off")
+
+        try:
+            loop = asyncio.get_running_loop()
+            _active_traffic_cycles["traffic"] = loop.create_task(_custom_sequence_worker())
+        except RuntimeError:
+            pass
+
+        return {
+            "success": True,
+            "message": f"Started custom traffic sequence with {len(steps)} steps.",
+            "speechText": f"Running traffic sequence with {len(steps)} steps.",
+        }
 
     if isinstance(sequence_or_cycles, dict):
         cycles = sequence_or_cycles.get("cycles", 3)
@@ -549,95 +608,75 @@ def cancel_traffic_sequence() -> Dict[str, Any]:
     if "traffic" in _active_traffic_cycles:
         _active_traffic_cycles["traffic"].cancel()
         _active_traffic_cycles.pop("traffic", None)
-    return {
-        "success": True,
-        "message": "Traffic sequence cancelled.",
-        "speechText": "Traffic sequence cancelled.",
-    }
+
+    for timer in _active_timers.values():
+        timer.cancel()
+    _active_timers.clear()
+
+    # Turn off all lights
+    return control_leds(color="all", action="OFF")
 
 
-def set_traffic_preset(mode: Literal["red", "yellow", "green", "off", "all"]) -> Dict[str, Any]:
+def set_traffic_preset(mode: str) -> Dict[str, Any]:
     """
-    Sets specific traffic light presets:
-    - 'red': Red ON, Yellow OFF, Green OFF
-    - 'yellow': Red OFF, Yellow ON, Green OFF
-    - 'green': Red OFF, Yellow OFF, Green ON
-    - 'off': All OFF
-    - 'all': All ON
+    Sets standard traffic light presets:
+    - 'red': only Red ON
+    - 'yellow': only Yellow ON
+    - 'green': only Green ON
+    - 'all': Red, Yellow, Green ON
+    - 'off': all OFF
     """
     mode_clean = mode.lower()
+    states = {"red": "OFF", "yellow": "OFF", "green": "OFF"}
+
     if mode_clean == "red":
-        set_single_led("red", "ON")
-        set_single_led("yellow", "OFF")
-        set_single_led("green", "OFF")
-        speech_text = "Red light active. Stop."
+        states["red"] = "ON"
     elif mode_clean == "yellow":
-        set_single_led("red", "OFF")
-        set_single_led("yellow", "ON")
-        set_single_led("green", "OFF")
-        speech_text = "Yellow light active. Caution."
+        states["yellow"] = "ON"
     elif mode_clean == "green":
-        set_single_led("red", "OFF")
-        set_single_led("yellow", "OFF")
-        set_single_led("green", "ON")
-        speech_text = "Green light active. Go."
-    elif mode_clean == "off":
-        set_single_led("red", "OFF")
-        set_single_led("yellow", "OFF")
-        set_single_led("green", "OFF")
-        speech_text = "All lights turned off."
+        states["green"] = "ON"
     elif mode_clean == "all":
-        set_single_led("red", "ON")
-        set_single_led("yellow", "ON")
-        set_single_led("green", "ON")
-        speech_text = "All lights turned on."
-    else:
-        mode_clean = "off"
-        set_single_led("red", "OFF")
-        set_single_led("yellow", "OFF")
-        set_single_led("green", "OFF")
-        speech_text = "All lights turned off."
+        states = {"red": "ON", "yellow": "ON", "green": "ON"}
+    elif mode_clean == "off":
+        states = {"red": "OFF", "yellow": "OFF", "green": "OFF"}
 
-    states = get_all_led_states()
+    hw_results = {}
+    for color, target in states.items():
+        _, hw_res = set_single_led(color, target)  # type: ignore
+        hw_results[color] = hw_res
 
-    _schedule_broadcast(states)
+    all_states = get_all_led_states()
+    _schedule_broadcast(all_states)
 
+    speech_text = f"Traffic preset set to {mode_clean}"
     return {
-        "success": True,
-        "preset": mode_clean,
-        "states": states,
-        "hardware": get_hardware_info(),
-        "message": f'**Traffic Preset ({mode_clean.upper()})**: "{speech_text}"',
+        "success": all(r.get("success", True) for r in hw_results.values()),
+        "mode": mode_clean,
+        "states": all_states,
+        "hardware": hw_results,
+        "message": f'**Preset Mode**: "{speech_text}"',
         "speechText": speech_text,
         "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
 def get_led_status() -> Dict[str, Any]:
+    """
+    Returns current states for Red, Yellow, Green LEDs and the Lamp.
+    """
     states = get_all_led_states()
-    auto_mode = get_lamp_auto_mode()
-    on_lights = [k for k, v in states.items() if v == "ON"]
-
-    items_summary = []
-    for k in ["red", "yellow", "green", "lamp"]:
-        if k in states:
-            name = "Lamp" if k == "lamp" else f"{k.capitalize()} LED"
-            items_summary.append(f"{name}: {states[k]}")
-
-    if len(on_lights) == 0:
-        speech_text = "All lights and lamp are currently OFF"
+    active_lights = [k for k, v in states.items() if v == "ON"]
+    if active_lights:
+        speech = f"Currently active: {', '.join(active_lights)}"
     else:
-        speech_text = f"Status: {', '.join(items_summary)}"
+        speech = "All lights and lamp are currently OFF"
 
     return {
         "success": True,
         "states": states,
-        "auto_mode": {
-            "lamp": auto_mode,
-        },
-        "onLights": on_lights,
-        "hardware": get_hardware_info(),
-        "message": f'**Hardware Status**: "{speech_text}"',
-        "speechText": speech_text,
+        "auto_mode": get_lamp_auto_mode(),
+        "hardware_info": get_hardware_info(),
+        "message": f'**Status Check**: "{speech}"',
+        "speechText": speech,
         "timestamp": datetime.now(UTC).isoformat(),
     }

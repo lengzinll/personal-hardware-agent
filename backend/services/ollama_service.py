@@ -34,7 +34,7 @@ async def process_ollama_command(
     base_url = OLLAMA_URL
     model_name = opts.get("model") or OLLAMA_MODEL
 
-    system_prompt = """You are AURA, an AI Copilot connected to a Traffic Light hardware controller (Red on GPIO 27, Yellow on GPIO 22, Green on GPIO 23) and a Lamp relay on GPIO 17.
+    system_prompt = """You are Johnwick, an AI Copilot connected to a Traffic Light hardware controller (Red on GPIO 27, Yellow on GPIO 22, Green on GPIO 23) and a Lamp relay on GPIO 17.
 
 Available Tools:
 - control_led(color, state): color='red'|'yellow'|'green'|'all', state='ON'|'OFF'|'TOGGLE'
@@ -69,76 +69,51 @@ Instructions:
             "type": "function",
             "function": {
                 "name": "control_led",
-                "description": "Control a specific LED (red, yellow, green) or all LEDs at the same time.",
+                "description": "Control an LED (red, yellow, green, or all) state (ON, OFF, TOGGLE).",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "color": {"type": "string", "enum": ["red", "yellow", "green", "all"], "description": "Target LED color or 'all'"},
-                        "state": {"type": "string", "enum": ["ON", "OFF", "TOGGLE"], "description": "Desired state"},
+                        "color": {"type": "string", "enum": ["red", "yellow", "green", "all"]},
+                        "state": {"type": "string", "enum": ["ON", "OFF", "TOGGLE"]}
                     },
-                    "required": ["color", "state"],
-                },
-            },
+                    "required": ["color", "state"]
+                }
+            }
         },
         {
             "type": "function",
             "function": {
                 "name": "control_lamp",
-                "description": "Control the relay-operated lamp (turn on, turn off, toggle).",
+                "description": "Control the relay-powered lamp (ON, OFF, TOGGLE).",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "state": {"type": "string", "enum": ["ON", "OFF", "TOGGLE"], "description": "Desired lamp state"},
+                        "state": {"type": "string", "enum": ["ON", "OFF", "TOGGLE"]}
                     },
-                    "required": ["state"],
-                },
-            },
+                    "required": ["state"]
+                }
+            }
         },
         {
             "type": "function",
             "function": {
-                "name": "set_traffic_preset",
-                "description": "Set traffic light presets: 'red', 'yellow', 'green', 'off', or 'all'.",
+                "name": "control_led_timed",
+                "description": "Control an LED or lamp and automatically turn it OFF after the specified duration.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "mode": {"type": "string", "enum": ["red", "yellow", "green", "off", "all"], "description": "Preset mode"},
+                        "color": {"type": "string", "enum": ["red", "yellow", "green", "lamp", "all"]},
+                        "duration": {"type": "string", "description": "e.g. 10s, 30s, 5 minutes, 1 hour"}
                     },
-                    "required": ["mode"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_led_status",
-                "description": "Get current state of all LED lights (Red, Yellow, Green) and Lamp Relay.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "control_leds_timed",
-                "description": "Execute a timed light or lamp control.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "color": {"type": "string", "enum": ["red", "yellow", "green", "lamp", "all"], "description": "Target light or lamp"},
-                        "duration": {"type": "string", "description": "Duration like '10s' or '5 minutes'"},
-                    },
-                    "required": ["color", "duration"],
-                },
-            },
+                    "required": ["color", "duration"]
+                }
+            }
         },
         {
             "type": "function",
             "function": {
                 "name": "run_traffic_sequence",
-                "description": "Run a custom traffic light sequence in order. Example: green 30s then yellow 5s then red 20s.",
+                "description": "Execute a custom multi-step traffic light sequence.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -148,124 +123,156 @@ Instructions:
                                 "type": "object",
                                 "properties": {
                                     "color": {"type": "string", "enum": ["red", "yellow", "green"]},
-                                    "duration": {"type": "string", "description": "Duration like '30s' or '5 minutes'"},
+                                    "duration": {"type": "string"}
                                 },
-                                "required": ["color", "duration"],
-                            },
-                        },
+                                "required": ["color", "duration"]
+                            }
+                        }
                     },
-                    "required": ["sequence"],
-                },
-            },
+                    "required": ["sequence"]
+                }
+            }
         },
         {
             "type": "function",
             "function": {
                 "name": "cancel_traffic_sequence",
-                "description": "Stop any active traffic cycle and turn all lights off.",
+                "description": "Stop any active traffic cycle and turn off all lights.",
+                "parameters": {"type": "object", "properties": {}}
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "set_traffic_preset",
+                "description": "Activate a traffic light preset mode (red, yellow, green, off, all).",
                 "parameters": {
                     "type": "object",
-                    "properties": {},
-                },
-            },
+                    "properties": {
+                        "mode": {"type": "string", "enum": ["red", "yellow", "green", "off", "all"]}
+                    },
+                    "required": ["mode"]
+                }
+            }
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_led_status",
+                "description": "Get current state of all traffic light LEDs and the lamp.",
+                "parameters": {"type": "object", "properties": {}}
+            }
+        }
     ]
 
-    iterations = 0
-    max_iterations = 3
-    final_content = ""
-    executed_action = "ollama_chat_response"
-    tool_results = None
+    payload = {
+        "model": model_name,
+        "messages": messages,
+        "stream": False,
+        "tools": tools
+    }
 
-    async with httpx.AsyncClient(timeout=45.0) as client:
-        while iterations < max_iterations:
-            iterations += 1
-            res = await client.post(
-                f"{base_url}/api/chat",
-                json={
-                    "model": model_name,
-                    "messages": messages,
-                    "tools": tools,
-                    "stream": False,
-                },
-            )
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            res = await client.post(f"{base_url}/api/chat", json=payload)
             if res.status_code != 200:
-                raise RuntimeError(f"Ollama API error ({res.status_code}): {res.text}")
+                err_msg = f"Ollama error: HTTP {res.status_code} - {res.text}"
+                return {
+                    "success": False,
+                    "error": err_msg,
+                    "reply": err_msg,
+                    "response": err_msg,
+                    "action": "error",
+                    "result": None,
+                    "model": model_name,
+                    "engine": "ollama",
+                    "timestamp": datetime.now(UTC).isoformat()
+                }
 
             data = res.json()
             msg = data.get("message", {})
-            messages.append(msg)
-
-            if msg.get("content"):
-                final_content += ("\n\n" if final_content else "") + msg["content"]
-
+            content = msg.get("content", "")
             tool_calls = msg.get("tool_calls", [])
+
+            executed_action = "chat_response"
+            tool_results = None
+
             if tool_calls:
-                for tool_call in tool_calls:
-                    func = tool_call.get("function", {})
-                    name = func.get("name")
-                    args = func.get("arguments", {})
+                for call in tool_calls:
+                    fn = call.get("function", {})
+                    fn_name = fn.get("name")
+                    fn_args = fn.get("arguments", {})
 
-                    tool_output: Any = None
-                    if name == "control_led":
-                        color = str(args.get("color", "all")).lower()
-                        state = str(args.get("state", "ON")).upper()
-                        tool_output = control_leds(color=color, action=state)  # type: ignore
-                        executed_action = f"led_{color}_{state.lower()}"
-                        tool_results = tool_output
-                    elif name == "control_lamp":
-                        state = str(args.get("state", "TOGGLE")).upper()
-                        tool_output = control_lamp(action=state)  # type: ignore
-                        executed_action = f"lamp_{state.lower()}"
-                        tool_results = tool_output
-                    elif name == "set_traffic_preset":
-                        mode = str(args.get("mode", "off")).lower()
-                        tool_output = set_traffic_preset(mode)  # type: ignore
-                        executed_action = f"traffic_preset_{mode}"
-                        tool_results = tool_output
-                    elif name == "run_traffic_sequence":
-                        sequence = args.get("sequence") or []
-                        if isinstance(sequence, list):
-                            parsed_sequence = []
-                            for step in sequence:
-                                if not isinstance(step, dict):
-                                    continue
-                                color = str(step.get("color", "")).lower()
-                                duration_str = str(step.get("duration", "0s")).strip()
-                                duration_seconds = parse_duration(duration_str)
-                                if color in {"red", "yellow", "green"} and duration_seconds > 0:
-                                    parsed_sequence.append({"color": color, "duration_seconds": duration_seconds})
-                            tool_output = run_traffic_sequence(parsed_sequence) if parsed_sequence else {"success": False, "message": "No valid traffic sequence steps were provided."}
-                            executed_action = "traffic_sequence"
-                            tool_results = tool_output
-                    elif name == "cancel_traffic_sequence":
-                        tool_output = cancel_traffic_sequence()
-                        executed_action = "traffic_sequence_cancelled"
-                        tool_results = tool_output
-                    elif name == "get_led_status":
-                        tool_output = get_led_status()
-                        executed_action = "led_status_checked"
-                        tool_results = tool_output
-                    elif name == "control_leds_timed":
-                        color = str(args.get("color", "all")).lower()
-                        duration_str = str(args.get("duration", "0s"))
-                        durations = parse_duration(duration_str)
-                        tool_output = control_leds_timed(color=color, action="ON", duration_seconds=durations)  # type: ignore
-                        executed_action = f"leds_timed_{color}_{duration_str}"
-                        tool_results = tool_output
+                    if fn_name == "control_led":
+                        color = fn_args.get("color")
+                        state = fn_args.get("state")
+                        tool_results = control_leds(color=color, state=state)
+                        executed_action = f"control_led({color}, {state})"
+                    elif fn_name == "control_lamp":
+                        state = fn_args.get("state")
+                        tool_results = control_lamp(state=state)
+                        executed_action = f"control_lamp({state})"
+                    elif fn_name == "control_led_timed":
+                        color = fn_args.get("color")
+                        duration = fn_args.get("duration")
+                        tool_results = control_leds_timed(color=color, duration=duration)
+                        executed_action = f"control_led_timed({color}, {duration})"
+                    elif fn_name == "run_traffic_sequence":
+                        sequence = fn_args.get("sequence", [])
+                        tool_results = run_traffic_sequence(sequence)
+                        executed_action = "run_traffic_sequence"
+                    elif fn_name == "cancel_traffic_sequence":
+                        tool_results = cancel_traffic_sequence()
+                        executed_action = "cancel_traffic_sequence"
+                    elif fn_name == "set_traffic_preset":
+                        mode = fn_args.get("mode")
+                        tool_results = set_traffic_preset(mode)
+                        executed_action = f"set_traffic_preset({mode})"
+                    elif fn_name == "get_led_status":
+                        tool_results = get_led_status()
+                        executed_action = "get_led_status"
 
+                # Send tool results back to Ollama to generate final response
+                messages.append(msg)
+                for call in tool_calls:
                     messages.append({
                         "role": "tool",
-                        "content": str(tool_output),
+                        "content": str(tool_results)
                     })
-            else:
-                break
 
-    return {
-        "success": True,
-        "response": final_content.strip() or "Processed command.",
-        "actionTaken": executed_action,
-        "payload": tool_results,
-        "model": f"Ollama Local ({model_name})",
-        "timestamp": datetime.now(UTC).isoformat(),
-    }
+                second_res = await client.post(f"{base_url}/api/chat", json={
+                    "model": model_name,
+                    "messages": messages,
+                    "stream": False
+                })
+
+                if second_res.status_code == 200:
+                    second_msg = second_res.json().get("message", {})
+                    content = second_msg.get("content", content)
+
+            final_text = content or f"Action {executed_action} completed."
+            return {
+                "success": True,
+                "response": final_text,
+                "reply": final_text,
+                "action": executed_action,
+                "actionTaken": executed_action if executed_action != "chat_response" else None,
+                "result": tool_results,
+                "payload": tool_results,
+                "model": model_name,
+                "engine": "ollama",
+                "timestamp": datetime.now(UTC).isoformat()
+            }
+    except Exception as e:
+        err_msg = f"Failed to execute local Ollama command: {str(e)}"
+        return {
+            "success": False,
+            "error": err_msg,
+            "reply": err_msg,
+            "response": err_msg,
+            "action": "error",
+            "result": None,
+            "model": model_name,
+            "engine": "ollama",
+            "timestamp": datetime.now(UTC).isoformat()
+        }

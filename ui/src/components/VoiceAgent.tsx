@@ -1,88 +1,112 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { toast } from 'sonner';
-import { ChatMessage } from './agent/types';
-import { VoiceAgentHeader } from './agent/VoiceAgentHeader';
-import { ChatMessageList } from './agent/ChatMessageList';
-import { ChatInputDock } from './agent/ChatInputDock';
 import {
   engineModeAtom,
   selectedOllamaModelAtom,
   ttsEnabledAtom,
   ttsSpeakingIdAtom,
+  realtimeSessionStateAtom,
 } from '@/lib/atoms';
 import { playBackendTTS, stopTTS } from '@/lib/tts';
+import { useRealtimeSession } from '@/lib/useRealtimeSession';
+import { ChatMessage } from './agent/types';
+import { VoiceAgentHeader } from './agent/VoiceAgentHeader';
+import { ChatMessageList } from './agent/ChatMessageList';
+import { ChatInputDock } from './agent/ChatInputDock';
+import { RealtimeStatusBar } from './agent/RealtimeStatusBar';
 
 interface VoiceAgentProps {
   onRefreshData?: () => void;
 }
 
 export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
-  // Global Jotai Atoms
-  const engineMode = useAtomValue(engineModeAtom);
-  const [selectedOllamaModel, setSelectedOllamaModel] = useAtom(selectedOllamaModelAtom);
-  const ttsEnabled = useAtomValue(ttsEnabledAtom);
-  const [, setSpeakingId] = useAtom(ttsSpeakingIdAtom);
-
-  // Local Component State
-  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
-  const [inputText, setInputText] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
       sender: 'agent',
-      text: "SYSTEM INITIALIZED: AURA Neural Interface Online. Ready to process voice & text hardware commands (e.g., 'Turn on lamp', 'Turn on red light', 'Run traffic cycle green 10s yellow 3s red 5s').",
-      timestamp: 'SYS_BOOT',
-      modelUsed: 'AURA_SYNAPSE_CORE',
+      text: "SYSTEM INITIALIZED: Johnwick Neural Interface Online. Speak any command (e.g. 'Turn on lamp', 'Turn on red light', 'Run traffic cycle green 10s yellow 3s red 5s').",
+      modelUsed: 'JOHNWICK_SYNAPSE_CORE',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
     },
   ]);
+  const [inputText, setInputText] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const engineMode = useAtomValue(engineModeAtom);
+  const [selectedOllamaModel, setSelectedOllamaModel] = useAtom(selectedOllamaModelAtom);
+  const ttsEnabled = useAtomValue(ttsEnabledAtom);
+  const [, setSpeakingId] = useAtom(ttsSpeakingIdAtom);
+  const sessionState = useAtomValue(realtimeSessionStateAtom);
 
-  // Fetch local Ollama models on mount
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
   useEffect(() => {
-    fetch('/api/ollama/models')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.models && data.models.length > 0) {
-          const names = data.models.map((m: any) => (typeof m === 'string' ? m : m.name || m.model || String(m)));
-          setOllamaModels(names);
-          if (names.includes('ornith-1.5:9b')) {
-            setSelectedOllamaModel('ornith-1.5:9b');
-          } else if (names[0]) {
-            setSelectedOllamaModel(names[0]);
+    scrollToBottom();
+  }, [messages, sessionState]);
+
+  // Fetch Ollama models
+  useEffect(() => {
+    async function fetchModels() {
+      try {
+        const res = await fetch('/api/system/ollama-models');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.models && data.models.length > 0) {
+            setOllamaModels(data.models);
+            if (!selectedOllamaModel || !data.models.includes(selectedOllamaModel)) {
+              setSelectedOllamaModel(data.models[0]);
+            }
           }
         }
-      })
-      .catch(() => { });
-  }, [setSelectedOllamaModel]);
+      } catch (err) {
+        console.warn('Could not fetch Ollama models:', err);
+      }
+    }
+    fetchModels();
+  }, [setSelectedOllamaModel, selectedOllamaModel]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+  // Handle incoming message from realtime voice hook
+  const handleNewRealtimeMessage = useCallback((msg: ChatMessage) => {
+    setMessages((prev) => [...prev, msg]);
+  }, []);
 
-  const handleSendMessage = async (msgText?: string) => {
-    const textToSend = msgText || inputText;
-    if (!textToSend.trim() || isLoading) return;
+  // Handle transcript change from speech recognition
+  const handleTranscriptChange = useCallback((liveText: string) => {
+    setInputText(liveText);
+  }, []);
 
-    // Stop any existing TTS speech when user sends a new message
-    stopTTS();
-    setSpeakingId(null);
+  // Realtime two-way voice hook with auto-fill into input box
+  const { toggleRealtime, manualPushToTalk, handleInterrupt } = useRealtimeSession({
+    onNewMessage: handleNewRealtimeMessage,
+    onRefreshData,
+    onTranscriptChange: handleTranscriptChange,
+    messages,
+  });
 
-    const userText = textToSend.trim();
-    const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const handleSendMessage = async () => {
+    if (!inputText.trim() || isLoading) return;
+
+    const userText = inputText.trim();
+    setInputText('');
+    setIsLoading(true);
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       sender: 'user',
       text: userText,
-      timestamp: nowTime,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
     };
+
+    setMessages((prev) => [...prev, userMsg]);
 
     const historyPayload = messages
       .filter((m) => m.id !== 'welcome' && m.id !== 'welcome_reset' && m.text && m.text.trim())
@@ -91,10 +115,6 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
         role: m.sender === 'user' ? 'user' : 'assistant',
         content: m.text,
       }));
-
-    setMessages((prev) => [...prev, userMsg]);
-    setInputText('');
-    setIsLoading(true);
 
     try {
       const res = await fetch('/api/agent/command', {
@@ -110,16 +130,17 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
 
       const data = await res.json();
       const modelDisplayName = engineMode === 'ollama' ? `OLLAMA:${selectedOllamaModel}` : 'GEMINI_FLASH';
-      const replyText = data.response || data.reply || data.text || 'No response text returned.';
+      const replyText = data.response || data.reply || data.text || '';
+      const isSuccess = data.success === true || (data.success !== false && !data.error && !!replyText);
       const agentMsgId = (Date.now() + 1).toString();
 
-      if (data.success) {
+      if (isSuccess && replyText) {
         const agentMsg: ChatMessage = {
           id: agentMsgId,
           sender: 'agent',
           text: replyText,
           actionTaken: data.actionTaken,
-          toolPayload: data.toolPayload || data.payload,
+          toolPayload: data.toolPayload || data.payload || data.result,
           modelUsed: modelDisplayName,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         };
@@ -129,9 +150,17 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
         // Trigger TTS if enabled
         if (ttsEnabled && replyText) {
           setSpeakingId(agentMsgId);
-          playBackendTTS(replyText, 'en-US-JennyNeural', undefined, () => {
-            setSpeakingId(null);
-          });
+          playBackendTTS(
+            replyText,
+            'en-US-JennyNeural',
+            undefined,
+            () => {
+              setSpeakingId(null);
+            },
+            () => {
+              setSpeakingId(null);
+            }
+          );
         }
 
         if (data.actionTaken) {
@@ -154,12 +183,10 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
       const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         sender: 'agent',
-        text: `⚠️ **COMMUNICATION_LINK_FAILURE**: ${err.message || 'Host offline'}`,
-        modelUsed: 'BUS_ERROR',
+        text: `⚠️ **SYSTEM_FAULT**: ${err.message || 'Network failure'}`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       };
       setMessages((prev) => [...prev, errorMsg]);
-      toast.error('LINK_OFFLINE');
     } finally {
       setIsLoading(false);
     }
@@ -168,55 +195,56 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
   const handleCopyMessage = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
-    toast.success('BUFFER_COPIED');
+    toast.success('COPIED_TO_CLIPBOARD');
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleClearHistory = () => {
+  const handleClearChatHistory = () => {
     stopTTS();
     setSpeakingId(null);
     setMessages([
       {
         id: 'welcome_reset',
         sender: 'agent',
-        text: "LOGS PURGED. Neural registers clear.",
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        modelUsed: 'AURA_SYNAPSE_CORE',
+        text: 'LOGS PURGED. Neural registers clear. Speak any command anytime.',
+        modelUsed: 'JOHNWICK_SYNAPSE_CORE',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       },
     ]);
-    toast.info('BUFFER_PURGED');
+    toast.info('BUFFER_RESET');
   };
 
   return (
-    <div className="hud-panel flex flex-col flex-1 h-full min-h-0 rounded-sm overflow-hidden">
-      {/* Header */}
-      <div className="shrink-0">
-        <VoiceAgentHeader
-          ollamaModels={ollamaModels}
-          clearChatHistory={handleClearHistory}
-        />
-      </div>
+    <div className="flex flex-col h-full bg-slate-950/90 border border-cyan-500/40 rounded-xs overflow-hidden shadow-[0_0_20px_rgba(0,240,255,0.15)] backdrop-blur-md">
+      {/* HUD Header */}
+      <VoiceAgentHeader
+        ollamaModels={ollamaModels}
+        clearChatHistory={handleClearChatHistory}
+      />
 
-      {/* Message Stream */}
-      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-        <ChatMessageList
-          messages={messages}
-          isLoading={isLoading}
-          copiedId={copiedId}
-          copyToClipboard={handleCopyMessage}
-          messagesEndRef={messagesEndRef}
-        />
-      </div>
+      {/* Realtime Status Ribbon */}
+      <RealtimeStatusBar
+        toggleRealtime={toggleRealtime}
+        manualPushToTalk={manualPushToTalk}
+        handleInterrupt={handleInterrupt}
+      />
 
-      {/* Input Dock */}
-      <div className="shrink-0">
-        <ChatInputDock
-          inputText={inputText}
-          setInputText={setInputText}
-          isLoading={isLoading}
-          handleSendMessage={() => handleSendMessage()}
-        />
-      </div>
+      {/* Main Terminal Message Feed */}
+      <ChatMessageList
+        messages={messages}
+        isLoading={isLoading}
+        copiedId={copiedId}
+        copyToClipboard={handleCopyMessage}
+        messagesEndRef={messagesEndRef}
+      />
+
+      {/* Command Input Dock */}
+      <ChatInputDock
+        inputText={inputText}
+        setInputText={setInputText}
+        isLoading={isLoading}
+        handleSendMessage={handleSendMessage}
+      />
     </div>
   );
 }
