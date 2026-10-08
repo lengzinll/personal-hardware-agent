@@ -45,6 +45,40 @@ export interface HardwareExecutionResult {
   error?: string;
 }
 
+export interface AgentCommandOptions {
+  command: string;
+  engineMode?: string;
+  ollamaModel?: string;
+  history?: any[];
+  onStreamStart?: (requestId: string) => void;
+  onStreamChunk?: (chunk: string, accumulated: string) => void;
+  onActionTaken?: (action: string, payload: any) => void;
+}
+
+export interface AgentCommandResult {
+  success: boolean;
+  response?: string;
+  reply?: string;
+  text?: string;
+  actionTaken?: string;
+  toolPayload?: any;
+  payload?: any;
+  result?: any;
+  model?: string;
+  modelUsed?: string;
+  timestamp?: string;
+  error?: string;
+  message?: string;
+}
+
+interface PendingAgentRequest {
+  resolve: (res: AgentCommandResult) => void;
+  reject: (err: any) => void;
+  timer: NodeJS.Timeout;
+  options: AgentCommandOptions;
+  accumulated: string;
+}
+
 interface UseLedWebSocketReturn {
   ledStates: LedStates;
   hardwareInfo: HardwareInfo | null;
@@ -53,19 +87,19 @@ interface UseLedWebSocketReturn {
   error: string | null;
   sendControlCommand: (color: string, action: string) => Promise<boolean>;
   sendPresetCommand: (mode: string) => Promise<boolean>;
+  sendAgentCommand: (options: AgentCommandOptions) => Promise<AgentCommandResult>;
 }
 
 /**
- * Custom hook for real-time LED & Lamp state synchronization via WebSocket with HTTP polling fallback.
- * Handles state updates, physical pin verification, and command sending.
+ * Custom hook for real-time LED & Lamp state synchronization and streaming AI agent commands over WebSocket.
  */
 export function useLedWebSocket(): UseLedWebSocketReturn {
-  const [ledStates, setLedStates] = useState<LedStates>(({
+  const [ledStates, setLedStates] = useState<LedStates>({
     red: 'OFF',
     yellow: 'OFF',
     green: 'OFF',
     lamp: 'OFF',
-  }));
+  });
   const [hardwareInfo, setHardwareInfo] = useState<HardwareInfo | null>(null);
   const [lastCommandResult, setLastCommandResult] = useState<HardwareExecutionResult | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -73,6 +107,7 @@ export function useLedWebSocket(): UseLedWebSocketReturn {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingRequestsRef = useRef<Map<string, PendingAgentRequest>>(new Map());
 
   // Fallback HTTP poller to ensure UI stays in sync if WebSocket is blocked or disconnected
   const syncStateViaHttp = useCallback(async () => {
@@ -91,13 +126,12 @@ export function useLedWebSocket(): UseLedWebSocketReturn {
 
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      // When running on standard web port or localhost, connect to backend port 8000
       let wsHost = window.location.host;
       if (window.location.port === '3000') {
         wsHost = `${window.location.hostname}:8000`;
       }
       const url = process.env.NEXT_PUBLIC_WS_URL || `${protocol}://${wsHost}/ws/led`;
-      
+
       const ws = new WebSocket(url);
       ws.onopen = () => {
         console.log('[LED WebSocket] Connected to', url);
@@ -108,11 +142,35 @@ export function useLedWebSocket(): UseLedWebSocketReturn {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          const reqId = data.requestId;
+          const pending = reqId ? pendingRequestsRef.current.get(reqId) : null;
+
           if (data.type === 'led_state') {
             if (data.states) setLedStates(data.states);
             if (data.hardware) setHardwareInfo(data.hardware);
           } else if (data.type === 'command_response') {
             if (data.payload?.hardware) setLastCommandResult(data.payload.hardware);
+          } else if (data.type === 'agent_stream_start') {
+            if (pending?.options?.onStreamStart) {
+              pending.options.onStreamStart(reqId);
+            }
+          } else if (data.type === 'agent_stream_chunk') {
+            if (pending) {
+              pending.accumulated += data.chunk || '';
+              if (pending.options?.onStreamChunk) {
+                pending.options.onStreamChunk(data.chunk, pending.accumulated);
+              }
+            }
+          } else if (data.type === 'agent_action') {
+            if (pending?.options?.onActionTaken) {
+              pending.options.onActionTaken(data.actionTaken, data.toolPayload);
+            }
+          } else if (data.type === 'agent_response') {
+            if (pending) {
+              clearTimeout(pending.timer);
+              pendingRequestsRef.current.delete(reqId);
+              pending.resolve(data);
+            }
           } else if (data.type === 'error') {
             console.warn('[LED WebSocket] Error message received:', data.message);
           }
@@ -122,7 +180,6 @@ export function useLedWebSocket(): UseLedWebSocketReturn {
       };
 
       ws.onerror = () => {
-        // WebSocket error events in browsers contain no textual details for security reasons
         console.warn(`[LED WebSocket] Connection failed to ${url}. Falling back to HTTP polling.`);
         setError('WebSocket offline (using HTTP fallback)');
         setIsConnected(false);
@@ -249,6 +306,81 @@ export function useLedWebSocket(): UseLedWebSocketReturn {
     []
   );
 
+  const sendAgentCommand = useCallback(
+    async (options: AgentCommandOptions): Promise<AgentCommandResult> => {
+      const requestId = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+      // If WebSocket is open and connected -> use ws.send() with real-time stream callbacks!
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        return new Promise<AgentCommandResult>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            if (pendingRequestsRef.current.has(requestId)) {
+              pendingRequestsRef.current.delete(requestId);
+              // Timeout fallback to HTTP if WebSocket took too long
+              fetch('/api/agent/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(options),
+              })
+                .then((r) => r.json())
+                .then(resolve)
+                .catch(reject);
+            }
+          }, 35000);
+
+          pendingRequestsRef.current.set(requestId, {
+            resolve,
+            reject,
+            timer,
+            options,
+            accumulated: '',
+          });
+
+          try {
+            console.log(
+              '%c[WebSocket ws.send()] Streaming Agent Command:',
+              'color: #38bdf8; font-weight: bold;',
+              options.command
+            );
+            wsRef.current?.send(
+              JSON.stringify({
+                type: 'agent_command',
+                requestId,
+                command: options.command,
+                engineMode: options.engineMode || 'ollama',
+                ollamaModel: options.ollamaModel,
+                history: options.history,
+              })
+            );
+          } catch (err) {
+            clearTimeout(timer);
+            pendingRequestsRef.current.delete(requestId);
+            // Fallback to HTTP
+            fetch('/api/agent/command', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(options),
+            })
+              .then((r) => r.json())
+              .then(resolve)
+              .catch(reject);
+          }
+        });
+      }
+
+      // If WebSocket not ready -> HTTP fallback
+      console.log('[Agent Command] WebSocket offline -> using HTTP POST fallback');
+      const res = await fetch('/api/agent/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(options),
+      });
+      const data = await res.json();
+      return data;
+    },
+    []
+  );
+
   return {
     ledStates,
     hardwareInfo,
@@ -257,5 +389,6 @@ export function useLedWebSocket(): UseLedWebSocketReturn {
     error,
     sendControlCommand,
     sendPresetCommand,
+    sendAgentCommand,
   };
 }

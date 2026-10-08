@@ -12,6 +12,7 @@ import {
 } from '@/lib/atoms';
 import { playBackendTTS, stopTTS } from '@/lib/tts';
 import { useRealtimeSession } from '@/lib/useRealtimeSession';
+import { useLedWebSocket } from '@/lib/useLedWebSocket';
 import { ChatMessage } from './agent/types';
 import { VoiceAgentHeader } from './agent/VoiceAgentHeader';
 import { ChatMessageList } from './agent/ChatMessageList';
@@ -27,7 +28,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
     {
       id: 'welcome',
       sender: 'agent',
-      text: "SYSTEM INITIALIZED: Johnwick Neural Interface Online. Speak any command (e.g. 'Turn on lamp', 'Turn on red light', 'Run traffic cycle green 10s yellow 3s red 5s').",
+      text: "SYSTEM INITIALIZED: Johnwick Neural Interface Online. Speak any command (e.g. 'Turn on lamp', 'Turn on red light', 'Run traffic cycle green 10s yellow 3s red 5s').\n\n*(Tip: **Google Chrome** is recommended for the most responsive voice recognition and speech synthesis).* ",
       modelUsed: 'JOHNWICK_SYNAPSE_CORE',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
     },
@@ -43,6 +44,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
   const [, setSpeakingId] = useAtom(ttsSpeakingIdAtom);
   const sessionState = useAtomValue(realtimeSessionStateAtom);
 
+  const { sendAgentCommand } = useLedWebSocket();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -74,9 +76,17 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
     fetchModels();
   }, [setSelectedOllamaModel, selectedOllamaModel]);
 
-  // Handle incoming message from realtime voice hook
+  // Handle incoming / streaming message from realtime voice hook or WebSocket
   const handleNewRealtimeMessage = useCallback((msg: ChatMessage) => {
-    setMessages((prev) => [...prev, msg]);
+    setMessages((prev) => {
+      const idx = prev.findIndex((m) => m.id === msg.id);
+      if (idx !== -1) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...msg };
+        return next;
+      }
+      return [...prev, msg];
+    });
   }, []);
 
   // Handle transcript change from speech recognition
@@ -89,6 +99,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
     onNewMessage: handleNewRealtimeMessage,
     onRefreshData,
     onTranscriptChange: handleTranscriptChange,
+    sendAgentCommand,
     messages,
   });
 
@@ -116,38 +127,73 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
         content: m.text,
       }));
 
+    const agentMsgId = (Date.now() + 1).toString();
+    const modelDisplayName = engineMode === 'ollama' ? `OLLAMA:${selectedOllamaModel}` : 'GEMINI_FLASH';
+
     try {
-      const res = await fetch('/api/agent/command', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          command: userText,
-          engineMode,
-          ollamaModel: selectedOllamaModel,
-          history: historyPayload,
-        }),
+      // Send agent command over WebSocket with real-time UI token streaming
+      const data = await sendAgentCommand({
+        command: userText,
+        engineMode,
+        ollamaModel: selectedOllamaModel,
+        history: historyPayload,
+        onStreamStart: () => {
+          handleNewRealtimeMessage({
+            id: agentMsgId,
+            sender: 'agent',
+            text: '',
+            isStreaming: true,
+            modelUsed: modelDisplayName,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          });
+        },
+        onStreamChunk: (_chunk, accumulated) => {
+          handleNewRealtimeMessage({
+            id: agentMsgId,
+            sender: 'agent',
+            text: accumulated,
+            isStreaming: true,
+            modelUsed: modelDisplayName,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          });
+        },
+        onActionTaken: (action, payload) => {
+          handleNewRealtimeMessage({
+            id: agentMsgId,
+            sender: 'agent',
+            text: '',
+            isStreaming: true,
+            actionTaken: action,
+            toolPayload: payload,
+            modelUsed: modelDisplayName,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          });
+        },
       });
 
-      const data = await res.json();
-      const modelDisplayName = engineMode === 'ollama' ? `OLLAMA:${selectedOllamaModel}` : 'GEMINI_FLASH';
       const replyText = data.response || data.reply || data.text || '';
       const isSuccess = data.success === true || (data.success !== false && !data.error && !!replyText);
-      const agentMsgId = (Date.now() + 1).toString();
 
       if (isSuccess && replyText) {
         const agentMsg: ChatMessage = {
           id: agentMsgId,
           sender: 'agent',
           text: replyText,
+          isStreaming: false,
           actionTaken: data.actionTaken,
           toolPayload: data.toolPayload || data.payload || data.result,
           modelUsed: modelDisplayName,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         };
 
-        setMessages((prev) => [...prev, agentMsg]);
+        handleNewRealtimeMessage(agentMsg);
 
-        // Trigger TTS if enabled
+        if (data.actionTaken) {
+          toast.success('⚡ HARDWARE_COMMITTED', { description: replyText });
+          if (onRefreshData) onRefreshData();
+        }
+
+        // Trigger TTS playback ONLY AFTER streaming is fully finished
         if (ttsEnabled && replyText) {
           setSpeakingId(agentMsgId);
           playBackendTTS(
@@ -162,21 +208,17 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
             }
           );
         }
-
-        if (data.actionTaken) {
-          toast.success('⚡ HARDWARE_COMMITTED', { description: replyText });
-          if (onRefreshData) onRefreshData();
-        }
       } else {
         const errMsg = data.error || data.message || 'Failed to process command';
         const errorAgentMsg: ChatMessage = {
           id: agentMsgId,
           sender: 'agent',
           text: `⚠️ **EXECUTION_ERROR**: ${errMsg}`,
+          isStreaming: false,
           modelUsed: modelDisplayName,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         };
-        setMessages((prev) => [...prev, errorAgentMsg]);
+        handleNewRealtimeMessage(errorAgentMsg);
         toast.error('COMMAND_FAILED', { description: errMsg });
       }
     } catch (err: any) {
@@ -184,9 +226,10 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
         id: (Date.now() + 1).toString(),
         sender: 'agent',
         text: `⚠️ **SYSTEM_FAULT**: ${err.message || 'Network failure'}`,
+        isStreaming: false,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       };
-      setMessages((prev) => [...prev, errorMsg]);
+      handleNewRealtimeMessage(errorMsg);
     } finally {
       setIsLoading(false);
     }

@@ -1,8 +1,9 @@
 from datetime import datetime, UTC
 import re
+import asyncio
 from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, AsyncGenerator
 from config import GEMINI_API_KEY, OLLAMA_MODEL
 from database import add_log
 from services.led_tool import (
@@ -17,7 +18,7 @@ from services.led_tool import (
     control_lamp,
 )
 from services.gemini_service import process_gemini_command
-from services.ollama_service import process_ollama_command
+from services.ollama_service import process_ollama_command, stream_ollama_command
 
 router = APIRouter(prefix="/api/agent", tags=["Agent"])
 
@@ -137,6 +138,72 @@ def parse_local_led_command(text: str) -> Optional[Dict[str, Any]]:
         return {"action": "lamp_off", "result": res}
 
     return None
+
+async def stream_agent_command(req: AgentCommandRequest) -> AsyncGenerator[Dict[str, Any], None]:
+    """Streams token chunks for real-time typewriter render on client UI."""
+    input_text = req.command.strip()
+    if not input_text:
+        yield {"type": "end", "response": "Please enter a command for your Personal Agent.", "actionTaken": None, "toolPayload": None, "model": "System"}
+        return
+
+    add_log("agent_command", f'Received command: "{input_text}"')
+    user_api_key = req.apiKey.strip() if req.apiKey else GEMINI_API_KEY.strip()
+    ollama_model = req.ollamaModel or OLLAMA_MODEL
+
+    # Check local rule-based match first for instant sub-millisecond execution
+    local_match = parse_local_led_command(input_text)
+    if local_match:
+        res_data = local_match["result"]
+        msg = res_data.get("message", "Command executed.")
+        yield {
+            "type": "action",
+            "actionTaken": local_match["action"],
+            "toolPayload": res_data,
+            "model": "Local Hardware Engine"
+        }
+        # Stream response words smoothly
+        words = msg.split(" ")
+        for i, w in enumerate(words):
+            piece = w if i == 0 else " " + w
+            yield {"type": "chunk", "chunk": piece}
+            await asyncio.sleep(0.015)
+
+        yield {
+            "type": "end",
+            "response": msg,
+            "actionTaken": local_match["action"],
+            "toolPayload": res_data,
+            "model": "Local Hardware Engine",
+            "timestamp": datetime.now(UTC).isoformat()
+        }
+        return
+
+    # Direct Ollama Mode Streaming
+    if req.engineMode == "ollama":
+        try:
+            async for event in stream_ollama_command(input_text, options={"model": ollama_model, "history": req.history}):
+                yield event
+            return
+        except Exception as err:
+            print("Ollama stream error:", err)
+
+    # Gemini Mode or fallback
+    res = await handle_agent_command(req)
+    resp_text = res.get("response") or res.get("reply", "Command processed.")
+    words = resp_text.split(" ")
+    for i, w in enumerate(words):
+        piece = w if i == 0 else " " + w
+        yield {"type": "chunk", "chunk": piece}
+        await asyncio.sleep(0.015)
+
+    yield {
+        "type": "end",
+        "response": resp_text,
+        "actionTaken": res.get("actionTaken"),
+        "toolPayload": res.get("payload") or res.get("toolPayload"),
+        "model": res.get("model", "Gemini"),
+        "timestamp": res.get("timestamp", datetime.now(UTC).isoformat())
+    }
 
 @router.post("/command")
 async def handle_agent_command(req: AgentCommandRequest):

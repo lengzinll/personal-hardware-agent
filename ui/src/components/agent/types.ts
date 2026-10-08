@@ -6,6 +6,7 @@ export interface ChatMessage {
   toolPayload?: any;
   modelUsed?: string;
   timestamp: string;
+  isStreaming?: boolean;
 }
 
 export type EngineMode = 'ollama' | 'text_flash';

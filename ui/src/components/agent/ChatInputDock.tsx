@@ -1,7 +1,7 @@
 'use client';
 
 import { useAtomValue } from 'jotai';
-import { Send, CornerDownLeft } from 'lucide-react';
+import { Send, CornerDownLeft, Compass } from 'lucide-react';
 import { engineModeAtom, selectedOllamaModelAtom } from '@/lib/atoms';
 
 interface ChatInputDockProps {
@@ -51,7 +51,7 @@ export function ChatInputDock({
         <button
           type="submit"
           disabled={isLoading || !inputText.trim()}
-          className="px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-mono text-xs font-bold rounded-xs flex items-center gap-1.5 transition-all disabled:opacity-30 disabled:pointer-events-none hover:shadow-[0_0_12px_rgba(0,240,255,0.5)] shrink-0"
+          className="px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-mono text-xs font-bold rounded-xs flex items-center gap-1.5 transition-all disabled:opacity-30 disabled:pointer-events-none hover:shadow-[0_0_12px_rgba(0,240,255,0.5)] shrink-0 cursor-pointer"
         >
           {isLoading ? (
             <div className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
@@ -64,6 +64,18 @@ export function ChatInputDock({
           )}
         </button>
       </form>
+
+      {/* Helpful HUD footer with Chrome recommendation */}
+      <div className="flex items-center justify-between text-[10px] font-mono text-cyan-500/80 mt-1.5 px-0.5 select-none">
+        <span className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_4px_#00f0ff]" />
+          <span>Speak anytime — auto-sends 1s after you stop</span>
+        </span>
+        <span className="hidden sm:flex items-center gap-1 text-cyan-400/70">
+          <Compass className="w-3 h-3 text-cyan-300 shrink-0" />
+          <span>Recommended Browser: <strong className="text-cyan-200 font-semibold tracking-wide">Google Chrome</strong></span>
+        </span>
+      </div>
     </div>
   );
 }

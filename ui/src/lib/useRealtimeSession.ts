@@ -18,11 +18,13 @@ import {
   RealtimeSessionState,
 } from './atoms';
 import { ChatMessage } from '@/components/agent/types';
+import { AgentCommandOptions, AgentCommandResult } from './useLedWebSocket';
 
 interface UseRealtimeSessionProps {
   onNewMessage?: (message: ChatMessage) => void;
   onRefreshData?: () => void;
   onTranscriptChange?: (transcript: string) => void;
+  sendAgentCommand?: (options: AgentCommandOptions) => Promise<AgentCommandResult>;
   messages: ChatMessage[];
 }
 
@@ -30,6 +32,7 @@ export function useRealtimeSession({
   onNewMessage,
   onRefreshData,
   onTranscriptChange,
+  sendAgentCommand,
   messages,
 }: UseRealtimeSessionProps) {
   const [realtimeEnabled, setRealtimeEnabled] = useAtom(realtimeEnabledAtom);
@@ -57,6 +60,8 @@ export function useRealtimeSession({
   onNewMessageRef.current = onNewMessage;
   const onRefreshDataRef = useRef(onRefreshData);
   onRefreshDataRef.current = onRefreshData;
+  const sendAgentCommandRef = useRef(sendAgentCommand);
+  sendAgentCommandRef.current = sendAgentCommand;
 
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastSpeechTimestampRef = useRef<number>(0);
@@ -192,7 +197,7 @@ export function useRealtimeSession({
           }
           return;
         }
-        // console.warn('[SpeechRecognition Error]:', e.error);
+        console.warn('[SpeechRecognition Error]:', e.error);
       };
 
       recognition.onend = () => {
@@ -340,20 +345,68 @@ export function useRealtimeSession({
     const modelDisplayName = engineMode === 'ollama' ? `OLLAMA:${selectedOllamaModel || 'local'}` : 'GEMINI_CLOUD';
 
     try {
-      let res: Response;
+      let data: any;
 
       if (cleanCommand) {
-        // Direct JSON command transmission to /api/agent/command
-        res = await fetch('/api/agent/command', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        // Transmit via WebSocket ws.send() with real-time UI token streaming
+        if (sendAgentCommandRef.current) {
+          data = await sendAgentCommandRef.current({
             command: cleanCommand,
             engineMode,
             ollamaModel: selectedOllamaModel,
             history: historyPayload,
-          }),
-        });
+            onStreamStart: () => {
+              if (onNewMessageRef.current) {
+                onNewMessageRef.current({
+                  id: agentMsgId,
+                  sender: 'agent',
+                  text: '',
+                  isStreaming: true,
+                  modelUsed: modelDisplayName,
+                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                });
+              }
+            },
+            onStreamChunk: (_chunk, accumulated) => {
+              if (onNewMessageRef.current) {
+                onNewMessageRef.current({
+                  id: agentMsgId,
+                  sender: 'agent',
+                  text: accumulated,
+                  isStreaming: true,
+                  modelUsed: modelDisplayName,
+                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                });
+              }
+            },
+            onActionTaken: (action, payload) => {
+              if (onNewMessageRef.current) {
+                onNewMessageRef.current({
+                  id: agentMsgId,
+                  sender: 'agent',
+                  text: '',
+                  isStreaming: true,
+                  actionTaken: action,
+                  toolPayload: payload,
+                  modelUsed: modelDisplayName,
+                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                });
+              }
+            },
+          });
+        } else {
+          const res = await fetch('/api/agent/command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              command: cleanCommand,
+              engineMode,
+              ollamaModel: selectedOllamaModel,
+              history: historyPayload,
+            }),
+          });
+          data = await res.json();
+        }
       } else if (wavBlob) {
         // Form-data upload for raw WAV audio if SpeechRecognition produced no text
         const formData = new FormData();
@@ -362,10 +415,11 @@ export function useRealtimeSession({
         formData.append('ollamaModel', selectedOllamaModel || '');
         formData.append('history', JSON.stringify(historyPayload));
 
-        res = await fetch('/api/realtime/audio', {
+        const res = await fetch('/api/realtime/audio', {
           method: 'POST',
           body: formData,
         });
+        data = await res.json();
       } else {
         setSessionState('standby');
         isProcessingRef.current = false;
@@ -374,82 +428,62 @@ export function useRealtimeSession({
         return;
       }
 
-      if (res.ok) {
-        const data = await res.json();
-        const replyText = data.response || data.reply || data.text || (data.success ? 'Command executed successfully.' : 'Action processed.');
-        const isSuccess = data.success === true || (data.success !== false && !data.error && !!replyText);
+      const replyText = data.response || data.reply || data.text || (data.success ? 'Command executed successfully.' : 'Action processed.');
+      const isSuccess = data.success === true || (data.success !== false && !data.error && !!replyText);
 
-        console.log(
-          '%c[🤖 AGENT RESPONSE RECEIVED]',
-          'color: #38ef7d; font-weight: bold; background: #064e3b; padding: 4px 10px; border-radius: 4px; font-size: 12px;',
-          replyText
-        );
+      console.log(
+        '%c[🤖 AGENT RESPONSE RECEIVED]',
+        'color: #38ef7d; font-weight: bold; background: #064e3b; padding: 4px 10px; border-radius: 4px; font-size: 12px;',
+        replyText
+      );
 
-        if (isSuccess && replyText) {
-          const agentMsg: ChatMessage = {
-            id: agentMsgId,
-            sender: 'agent',
-            text: replyText,
-            actionTaken: data.actionTaken,
-            toolPayload: data.toolPayload || data.payload || data.result,
-            modelUsed: modelDisplayName,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          };
+      if (isSuccess && replyText) {
+        const agentMsg: ChatMessage = {
+          id: agentMsgId,
+          sender: 'agent',
+          text: replyText,
+          isStreaming: false,
+          actionTaken: data.actionTaken,
+          toolPayload: data.toolPayload || data.payload || data.result,
+          modelUsed: modelDisplayName,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        };
 
-          if (onNewMessageRef.current) onNewMessageRef.current(agentMsg);
+        if (onNewMessageRef.current) onNewMessageRef.current(agentMsg);
 
-          if (data.actionTaken) {
-            toast.success('⚡ HARDWARE_COMMITTED', { description: replyText });
-            if (onRefreshDataRef.current) onRefreshDataRef.current();
-          }
+        if (data.actionTaken) {
+          toast.success('⚡ HARDWARE_COMMITTED', { description: replyText });
+          if (onRefreshDataRef.current) onRefreshDataRef.current();
+        }
 
-          // Trigger TTS playback if enabled - with complete echo suppression
-          if (ttsEnabled && replyText) {
-            setSpeakingId(agentMsgId);
-            playBackendTTS(
-              replyText,
-              'en-US-JennyNeural',
-              undefined,
-              () => {
-                setSpeakingId(null);
-              },
-              () => {
-                setSpeakingId(null);
-              }
-            );
-          } else {
-            setSessionState('standby');
-            latestLiveTranscriptRef.current = '';
-            if (onTranscriptChangeRef.current) onTranscriptChangeRef.current('');
-            if (recorderRef.current) recorderRef.current.resumeListening();
-            startSpeechRecognition();
-          }
+        // Trigger TTS playback ONLY AFTER streaming is fully finished
+        if (ttsEnabled && replyText) {
+          setSpeakingId(agentMsgId);
+          playBackendTTS(
+            replyText,
+            'en-US-JennyNeural',
+            undefined,
+            () => {
+              setSpeakingId(null);
+            },
+            () => {
+              setSpeakingId(null);
+            }
+          );
         } else {
-          const errMsg = data.error || data.message || 'Failed to process voice command';
-          const errorAgentMsg: ChatMessage = {
-            id: agentMsgId,
-            sender: 'agent',
-            text: `⚠️ **EXECUTION_ERROR**: ${errMsg}`,
-            modelUsed: modelDisplayName,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          };
-          if (onNewMessageRef.current) onNewMessageRef.current(errorAgentMsg);
           setSessionState('standby');
+          latestLiveTranscriptRef.current = '';
           if (onTranscriptChangeRef.current) onTranscriptChangeRef.current('');
           if (recorderRef.current) recorderRef.current.resumeListening();
           startSpeechRecognition();
         }
       } else {
-        let errMsg = 'Failed to process voice command';
-        try {
-          const errData = await res.json();
-          if (errData?.error) errMsg = errData.error;
-        } catch {}
-
+        const errMsg = data.error || data.message || 'Failed to process voice command';
         const errorAgentMsg: ChatMessage = {
           id: agentMsgId,
           sender: 'agent',
           text: `⚠️ **EXECUTION_ERROR**: ${errMsg}`,
+          isStreaming: false,
           modelUsed: modelDisplayName,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         };

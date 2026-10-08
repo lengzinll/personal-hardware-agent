@@ -72,7 +72,7 @@ export function ChatMessageList({
             {/* Header Line */}
             <div className="flex items-center justify-between gap-4 mb-1.5 pb-1 border-b border-cyan-500/20 text-[10px]">
               <span className="font-bold flex items-center gap-1.5 text-cyan-300">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_4px_#00f0ff]" />
                 {msg.sender === 'user' ? 'OPERATOR_TRANSMISSION' : 'JOHNWICK_SYNAPSE_CORE'}
                 {msg.modelUsed && (
                   <span className="text-xs text-cyan-500/80 font-mono hidden sm:inline">[{msg.modelUsed}]</span>
@@ -80,51 +80,65 @@ export function ChatMessageList({
               </span>
             </div>
 
-            {/* Markdown Text */}
-            <div className="prose prose-invert max-w-full leading-relaxed wrap-break-word text-cyan-100 text-xs">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  table: ({ children }) => (
-                    <div className="my-2 overflow-x-auto rounded-xs border border-cyan-500/40 bg-cyan-950/40">
-                      <table className="w-full text-left text-[11px] border-collapse divide-y divide-cyan-500/30">{children}</table>
-                    </div>
-                  ),
-                  thead: ({ children }) => (
-                    <thead className="bg-cyan-900/40 text-cyan-300 uppercase font-semibold text-[10px] tracking-wider">{children}</thead>
-                  ),
-                  tbody: ({ children }) => (
-                    <tbody className="divide-y divide-cyan-500/20 bg-slate-950/40">{children}</tbody>
-                  ),
-                  tr: ({ children }) => (
-                    <tr className="hover:bg-cyan-500/10 transition-colors">{children}</tr>
-                  ),
-                  th: ({ children }) => (
-                    <th className="px-2 py-1.5 text-[10px] font-semibold text-cyan-200">{children}</th>
-                  ),
-                  td: ({ children }) => (
-                    <td className="px-2 py-1.5 text-cyan-100 font-mono text-[10px]">{children}</td>
-                  ),
-                  p: ({ children }) => (
-                    <p className="mb-1.5 last:mb-0 leading-normal">{children}</p>
-                  ),
-                  ul: ({ children }) => (
-                    <ul className="list-disc pl-4 mb-1.5 space-y-0.5 text-cyan-200">{children}</ul>
-                  ),
-                  ol: ({ children }) => (
-                    <ol className="list-decimal pl-4 mb-1.5 space-y-0.5 text-cyan-200">{children}</ol>
-                  ),
-                  li: ({ children }) => (
-                    <li className="text-inherit">{children}</li>
-                  ),
-                  code: ({ children }) => (
-                    <code className="px-1 py-0.5 rounded-xs bg-cyan-950 border border-cyan-500/40 font-mono text-[10px] text-cyan-300">{children}</code>
-                  ),
-                }}
-              >
-                {msg.text}
-              </ReactMarkdown>
-            </div>
+            {/* Content: If empty / waiting for first token, show SYNAPSE_PROCESSING in place */}
+            {!msg.text ? (
+              <div className="flex items-center gap-2 text-cyan-300 py-1">
+                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping shrink-0" />
+                <span className="tracking-wider text-[11px] animate-pulse text-cyan-300 font-bold">
+                  SYNAPSE_PROCESSING...
+                </span>
+              </div>
+            ) : (
+              <div className="prose prose-invert max-w-full leading-relaxed wrap-break-word text-cyan-100 text-xs">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    table: ({ children }) => (
+                      <div className="my-2 overflow-x-auto rounded-xs border border-cyan-500/40 bg-cyan-950/40">
+                        <table className="w-full text-left text-[11px] border-collapse divide-y divide-cyan-500/30">{children}</table>
+                      </div>
+                    ),
+                    thead: ({ children }) => (
+                      <thead className="bg-cyan-900/40 text-cyan-300 uppercase font-semibold text-[10px] tracking-wider">{children}</thead>
+                    ),
+                    tbody: ({ children }) => (
+                      <tbody className="divide-y divide-cyan-500/20 bg-slate-950/40">{children}</tbody>
+                    ),
+                    tr: ({ children }) => (
+                      <tr className="hover:bg-cyan-500/10 transition-colors">{children}</tr>
+                    ),
+                    th: ({ children }) => (
+                      <th className="px-2 py-1.5 text-[10px] font-semibold text-cyan-200">{children}</th>
+                    ),
+                    td: ({ children }) => (
+                      <td className="px-2 py-1.5 text-cyan-100 font-mono text-[10px]">{children}</td>
+                    ),
+                    p: ({ children }) => (
+                      <p className="mb-1.5 last:mb-0 leading-normal">
+                        {children}
+                        {msg.isStreaming && (
+                          <span className="inline-block w-1.5 h-3 bg-cyan-400 animate-pulse ml-1 align-middle shadow-[0_0_6px_#00f0ff]" />
+                        )}
+                      </p>
+                    ),
+                    ul: ({ children }) => (
+                      <ul className="list-disc pl-4 mb-1.5 space-y-0.5 text-cyan-200">{children}</ul>
+                    ),
+                    ol: ({ children }) => (
+                      <ol className="list-decimal pl-4 mb-1.5 space-y-0.5 text-cyan-200">{children}</ol>
+                    ),
+                    li: ({ children }) => (
+                      <li className="text-inherit">{children}</li>
+                    ),
+                    code: ({ children }) => (
+                      <code className="px-1 py-0.5 rounded-xs bg-cyan-950 border border-cyan-500/40 font-mono text-[10px] text-cyan-300">{children}</code>
+                    ),
+                  }}
+                >
+                  {msg.text}
+                </ReactMarkdown>
+              </div>
+            )}
 
             {/* Hardware State Execution Pill */}
             {msg.actionTaken && (
@@ -136,52 +150,41 @@ export function ChatMessageList({
               </div>
             )}
 
-            {/* Action Bar */}
-            <div className="mt-1.5 pt-1 flex items-center justify-end gap-1.5 border-t border-cyan-500/20 text-cyan-500">
-              <button
-                type="button"
-                onClick={() => handlePlayVoice(msg.id, msg.text)}
-                title={speakingId === msg.id ? "HALT_SYNTH_VOICE" : "READ_AUDIO_TRANSMISSION"}
-                className={`p-1 rounded-xs hover:bg-cyan-500/20 hover:text-cyan-200 transition-colors ${
-                  speakingId === msg.id ? "text-cyan-300 bg-cyan-500/30" : ""
-                }`}
-              >
-                {speakingId === msg.id ? (
-                  <Square className="w-3 h-3 fill-current animate-pulse text-cyan-400" />
-                ) : (
-                  <Volume2 className="w-3 h-3" />
-                )}
-              </button>
+            {/* Action Bar: Shown when not streaming and has text */}
+            {!msg.isStreaming && msg.text && (
+              <div className="mt-1.5 pt-1 flex items-center justify-end gap-1.5 border-t border-cyan-500/20 text-cyan-500">
+                <button
+                  type="button"
+                  onClick={() => handlePlayVoice(msg.id, msg.text)}
+                  title={speakingId === msg.id ? "HALT_SYNTH_VOICE" : "READ_AUDIO_TRANSMISSION"}
+                  className={`p-1 rounded-xs hover:bg-cyan-500/20 hover:text-cyan-200 transition-colors cursor-pointer ${
+                    speakingId === msg.id ? "text-cyan-300 bg-cyan-500/30" : ""
+                  }`}
+                >
+                  {speakingId === msg.id ? (
+                    <Square className="w-3 h-3 fill-current animate-pulse text-cyan-400" />
+                  ) : (
+                    <Volume2 className="w-3 h-3" />
+                  )}
+                </button>
 
-              <button
-                type="button"
-                onClick={() => copyToClipboard(msg.text, msg.id)}
-                title="COPY_PAYLOAD"
-                className="p-1 rounded-xs hover:bg-cyan-500/20 hover:text-cyan-200 transition-colors"
-              >
-                {copiedId === msg.id ? (
-                  <Check className="w-3 h-3 text-emerald-400" />
-                ) : (
-                  <Copy className="w-3 h-3" />
-                )}
-              </button>
-            </div>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(msg.text, msg.id)}
+                  title="COPY_PAYLOAD"
+                  className="p-1 rounded-xs hover:bg-cyan-500/20 hover:text-cyan-200 transition-colors cursor-pointer"
+                >
+                  {copiedId === msg.id ? (
+                    <Check className="w-3 h-3 text-emerald-400" />
+                  ) : (
+                    <Copy className="w-3 h-3" />
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       ))}
-
-      {/* Loading telemetry indicator */}
-      {isLoading && (
-        <div className="flex items-start gap-2.5">
-          <div className="w-7 h-7 rounded-xs bg-cyan-950/80 border border-cyan-500/50 flex items-center justify-center shrink-0 text-cyan-300 text-xs font-bold animate-pulse">
-            AI
-          </div>
-          <div className="bg-slate-950/90 border border-cyan-500/50 rounded-xs p-2.5 text-[11px] text-cyan-300 flex items-center gap-2 shadow-[0_0_12px_rgba(0,240,255,0.2)]">
-            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-            <span className="tracking-wider">SYNAPSE_PROCESSING...</span>
-          </div>
-        </div>
-      )}
 
       <div ref={messagesEndRef} />
     </div>
