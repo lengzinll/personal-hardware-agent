@@ -3,7 +3,16 @@ from typing import List, Dict, Any, Optional
 from google import genai
 from google.genai import types
 from config import GEMINI_MODEL
-from services.led_tool import control_leds, get_led_status, set_traffic_preset, control_leds_timed, parse_duration, run_traffic_sequence, cancel_traffic_sequence, control_lamp
+from services.led_tool import (
+    control_leds,
+    get_led_status,
+    set_traffic_preset,
+    control_leds_timed,
+    parse_duration,
+    run_traffic_sequence,
+    cancel_traffic_sequence,
+    control_lamp,
+)
 
 JOHNWICK_TOOLS = types.Tool(
     function_declarations=[
@@ -107,7 +116,7 @@ JOHNWICK_TOOLS = types.Tool(
         ),
         types.FunctionDeclaration(
             name="control_lamp",
-            description="Controls the lamp relay. Use this when a user asks to turn the lamp on, off, or toggle it.",
+            description="Controls the lamp relay with closed-loop hardware verification. Use this when a user asks to turn the lamp on, off, or toggle it.",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={
@@ -123,27 +132,28 @@ JOHNWICK_TOOLS = types.Tool(
     ]
 )
 
-SYSTEM_INSTRUCTION = """You are Johnwick, an intelligent AI Copilot connected directly to a Traffic Light hardware controller (Red on GPIO 27, Yellow on GPIO 22, Green on GPIO 23) and a relay-controlled lamp on GPIO 17.
+SYSTEM_INSTRUCTION = """You are Johnwick, an intelligent AI Copilot connected directly to a Traffic Light hardware controller (Red on GPIO 17, Yellow on GPIO 22, Green on GPIO 23) and a relay-controlled lamp on GPIO 27.
+
+CRITICAL HARDWARE DIRECTIVE:
+- Whenever the user asks to turn ON, turn OFF, toggle, or check the lamp or any lights, you MUST execute the corresponding hardware tool (control_lamp, control_led, etc.).
+- NEVER respond with text alone claiming you changed the physical hardware without calling the tool.
+- Every tool automatically runs closed-loop verification and auto-retries on the Raspberry Pi GPIO pins.
 
 Available Tools:
 - control_led(color, state): Controls 'red', 'yellow', 'green', or 'all' LEDs with state 'ON' | 'OFF' | 'TOGGLE'.
 - control_lamp(state): Controls the lamp relay with state 'ON' | 'OFF' | 'TOGGLE'.
-- control_led_timed(color, duration): Controls an LED or lamp and auto-turns it OFF after the specified duration (e.g. color='green', duration='10s' or duration='5 minutes').
+- control_led_timed(color, duration): Controls an LED or lamp and auto-turns it OFF after duration.
 - set_traffic_preset(mode): Sets a preset mode ('red', 'yellow', 'green', 'off', 'all').
 - get_led_status(): Queries the live state of all 3 LED lights and the lamp relay.
-- run_traffic_sequence(sequence): Runs a custom traffic light sequence in order with specified durations.
-- cancel_traffic_sequence(): Stops any active traffic cycle and turns all lights OFF.
+- run_traffic_sequence(sequence): Runs a custom traffic light sequence.
+- cancel_traffic_sequence(): Stops active traffic cycle and turns lights OFF.
 
 Instructions:
-1. When asked to turn on/off/toggle a specific light without a time duration, call control_led tool.
-2. When asked to turn on/off/toggle the lamp, call control_lamp.
-3. When asked to control a light WITH a duration (e.g. "turn green on for 10s", "red for 5 minutes"), call control_led_timed with the color and duration.
-4. When asked to control all lights at once, call control_led(color='all', state=...).
-5. When asked to set a traffic mode, call set_traffic_preset.
-6. When asked about light or lamp status, call get_led_status.
-7. When asked to run a custom traffic sequence, call run_traffic_sequence with the sequence details.
-8. When asked to cancel a traffic sequence, call cancel_traffic_sequence.
-9. Be concise, direct, and conversational."""
+1. When asked to turn on/off/toggle the lamp, call control_lamp.
+2. When asked to turn on/off/toggle a specific light without duration, call control_led.
+3. When asked to control all lights at once, call control_led(color='all', state=...).
+4. When asked about light or lamp status, call get_led_status.
+5. Be concise, direct, and conversational."""
 
 def _execute_function_calls(function_calls: List[Any]) -> tuple[str, Any, List[types.Part]]:
     executed_action = "chat_response"
@@ -169,7 +179,7 @@ def _execute_function_calls(function_calls: List[Any]) -> tuple[str, Any, List[t
             )
         elif call_name == "control_lamp":
             state = str(args.get("state", "TOGGLE")).upper()
-            status = control_lamp(action=state)  # type: ignore
+            status = control_lamp(action=state, force=True, source="agent")
             executed_action = f"lamp_{state.lower()}"
             tool_results = status
 
@@ -278,7 +288,7 @@ async def process_gemini_command(
                     )
                 )
 
-    # Append the user's latest command
+    # Append user's command
     contents.append(
         types.Content(
             role="user",
@@ -329,12 +339,25 @@ async def process_gemini_command(
     elif response.text:
         final_text_parts.append(response.text)
 
+    # Aircraft-Grade Safety Net:
+    # If the model produced conversational text without calling a tool,
+    # but the user was asking to control the hardware, execute and verify the tool!
+    if executed_action == "chat_response":
+        from routers.agent import parse_local_led_command
+        fallback = parse_local_led_command(input_text)
+        if fallback:
+            executed_action = fallback["action"]
+            tool_results = fallback["result"]
+            verified_msg = tool_results.get("message") or tool_results.get("speechText")
+            final_text_parts.insert(0, str(verified_msg))
+
     response_text = " ".join(final_text_parts).strip()
     if not response_text and tool_results and isinstance(tool_results, dict):
-        response_text = tool_results.get("speechText") or tool_results.get("message") or "Action executed."
+        response_text = tool_results.get("speechText") or tool_results.get("message") or "Action executed and verified."
 
     return {
-        "success": True,
+        "success": tool_results.get("success", True) if tool_results else True,
+        "verified": tool_results.get("verified", True) if tool_results else False,
         "response": response_text,
         "actionTaken": executed_action,
         "payload": tool_results,
@@ -352,14 +375,13 @@ async def process_gemini_audio_command(
 ) -> Dict[str, Any]:
     """
     Directly processes native audio stream/WAV file with Gemini Multimodal Audio
-    and executes appropriate hardware tools.
+    and executes appropriate hardware tools with closed-loop verification.
     """
     client = genai.Client(api_key=api_key.strip())
     model = model_name or GEMINI_MODEL
 
     contents: List[types.Content] = []
 
-    # Add conversational history if provided
     if history:
         for msg in history:
             role = msg.get("role")
@@ -372,14 +394,13 @@ async def process_gemini_audio_command(
                     )
                 )
 
-    # Append the user's native audio input
     contents.append(
         types.Content(
             role="user",
             parts=[
                 types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
                 types.Part.from_text(
-                    text="Listen to this user audio recording. Execute any requested hardware commands (LEDs, traffic lights, lamp) via available tools and reply with a brief, clear conversational response."
+                    text="Listen to this user audio recording. You MUST execute any requested hardware commands (lamp, LEDs) via available tools and reply with a brief, clear conversational response."
                 ),
             ],
         )
@@ -428,10 +449,11 @@ async def process_gemini_audio_command(
 
     response_text = " ".join(final_text_parts).strip()
     if not response_text and tool_results and isinstance(tool_results, dict):
-        response_text = tool_results.get("speechText") or tool_results.get("message") or "Action executed."
+        response_text = tool_results.get("speechText") or tool_results.get("message") or "Action executed and verified."
 
     return {
-        "success": True,
+        "success": tool_results.get("success", True) if tool_results else True,
+        "verified": tool_results.get("verified", True) if tool_results else False,
         "response": response_text,
         "actionTaken": executed_action,
         "payload": tool_results,

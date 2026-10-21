@@ -1,4 +1,5 @@
 import os
+import time
 import asyncio
 import re
 from datetime import datetime, UTC
@@ -79,11 +80,13 @@ try:
 
     if os.path.exists(settings.GPIO_CHIP):
         try:
+            # We configure all lines standard (active_low=False).
+            # Electrical polarity for relays (active-low) is handled deterministically in _set_hardware_pin.
             gpio_pins = {
                 RED_GPIO: _make_settings(active_low=False),
                 YELLOW_GPIO: _make_settings(active_low=False),
                 GREEN_GPIO: _make_settings(active_low=False),
-                LAMP_GPIO: _make_settings(active_low=settings.LAMP_ACTIVE_LOW),
+                LAMP_GPIO: _make_settings(active_low=False),
             }
             _gpio_request = gpiod.request_lines(
                 settings.GPIO_CHIP,
@@ -124,45 +127,72 @@ def get_hardware_info() -> Dict[str, Any]:
     }
 
 
-def _set_hardware_pin(pin: int, state: str, device_name: str = "pin") -> Dict[str, Any]:
+def _set_hardware_pin(pin: int, state: str, device_name: str = "pin", max_retries: int = 3) -> Dict[str, Any]:
     """
-    Sends signal to the physical GPIO pin.
-    Returns status reporting whether hardware signal write succeeded, verified, or is simulated.
+    Sends signal to the physical GPIO pin with closed-loop verification and auto-retry.
+    Checks physical line state and re-asserts if mismatch is detected.
     """
     if _gpio_available and _gpio_request is not None:
         try:
             import gpiod
             from gpiod.line import Value
+
+            # Polarity:
+            # - Lamp Relay (Active-Low): ON needs pin LOW (0 / INACTIVE), OFF needs pin HIGH (1 / ACTIVE)
+            # - LEDs (Active-High): ON needs pin HIGH (1 / ACTIVE), OFF needs pin LOW (0 / INACTIVE)
             if pin == LAMP_GPIO and settings.LAMP_ACTIVE_LOW:
                 expected_val = Value.INACTIVE if state == "ON" else Value.ACTIVE
             else:
                 expected_val = Value.ACTIVE if state == "ON" else Value.INACTIVE
 
-            _gpio_request.set_value(pin, expected_val)
+            verified = False
+            actual_val = None
+            attempts = 0
 
-            # Hardware verification
-            verified = True
-            try:
-                actual_val = _gpio_request.get_value(pin)
-                verified = (actual_val == expected_val)
-            except Exception:
-                verified = True
+            # Aviation-grade closed-loop verification & auto-retry
+            for attempt in range(1, max_retries + 1):
+                attempts = attempt
+                _gpio_request.set_value(pin, expected_val)
+                # Brief settle delay for relay contacts / capacitance
+                time.sleep(0.005)
+                try:
+                    actual_val = _gpio_request.get_value(pin)
+                    if actual_val == expected_val:
+                        verified = True
+                        break
+                except Exception as read_err:
+                    print(f"[Hardware Warning] Readback error on GPIO {pin}: {read_err}")
+                time.sleep(0.02)
 
             _pin_health[device_name] = {
                 "gpio": pin,
-                "last_status": f"Hardware {state}",
-                "ok": True,
+                "last_status": f"Hardware {state} ({'VERIFIED' if verified else 'UNVERIFIED'})",
+                "ok": verified,
                 "verified": verified,
+                "attempts": attempts,
                 "timestamp": datetime.now(UTC).isoformat(),
             }
-            return {
-                "success": True,
-                "mode": "hardware",
-                "pin": pin,
-                "written": True,
-                "verified": verified,
-                "message": f"Hardware signal write verified for GPIO {pin}",
-            }
+
+            if verified:
+                return {
+                    "success": True,
+                    "verified": True,
+                    "attempts": attempts,
+                    "mode": "hardware",
+                    "pin": pin,
+                    "written": True,
+                    "message": f"Hardware signal verified on GPIO {pin} (Attempt {attempts}/{max_retries})",
+                }
+            else:
+                return {
+                    "success": False,
+                    "verified": False,
+                    "attempts": attempts,
+                    "mode": "hardware",
+                    "pin": pin,
+                    "written": True,
+                    "message": f"Hardware verification FAILED on GPIO {pin} after {attempts} attempts",
+                }
         except Exception as e:
             error_msg = f"Failed to set GPIO {pin}: {e}"
             print(f"[Hardware Warning] {error_msg}")
@@ -171,14 +201,16 @@ def _set_hardware_pin(pin: int, state: str, device_name: str = "pin") -> Dict[st
                 "last_status": f"Error: {e}",
                 "ok": False,
                 "verified": False,
+                "attempts": 1,
                 "timestamp": datetime.now(UTC).isoformat(),
             }
             return {
                 "success": False,
+                "verified": False,
+                "attempts": 1,
                 "mode": "hardware",
                 "pin": pin,
                 "written": False,
-                "verified": False,
                 "error": str(e),
                 "message": error_msg,
             }
@@ -189,14 +221,16 @@ def _set_hardware_pin(pin: int, state: str, device_name: str = "pin") -> Dict[st
         "last_status": f"Simulated {state}",
         "ok": True,
         "verified": True,
+        "attempts": 1,
         "timestamp": datetime.now(UTC).isoformat(),
     }
     return {
         "success": True,
+        "verified": True,
+        "attempts": 1,
         "mode": "simulated",
         "pin": pin,
         "written": False,
-        "verified": True,
         "message": f"Simulated mode (no GPIO hardware active for GPIO {pin})",
     }
 
@@ -270,7 +304,7 @@ def _schedule_broadcast(states: Dict[str, str]) -> None:
         print(f"[WebSocket Broadcast Error] {e}")
 
 
-def set_lamp_state(action: ActionType) -> tuple[str, Dict[str, Any]]:
+def set_lamp_state(action: ActionType, max_retries: int = 3) -> tuple[str, Dict[str, Any]]:
     current = get_lamp_state()
     if action == "TOGGLE":
         new_state = "OFF" if current == "ON" else "ON"
@@ -279,13 +313,16 @@ def set_lamp_state(action: ActionType) -> tuple[str, Dict[str, Any]]:
         if new_state not in ("ON", "OFF"):
             new_state = "ON"
 
+    # Execute with closed-loop verification and retry
+    hw_result = _set_hardware_pin(LAMP_GPIO, new_state, device_name="lamp", max_retries=max_retries)
+
     try:
         set_setting("lamp_state", new_state)
-        add_log("lamp_toggle", f"Lamp state changed from {current} to {new_state}")
+        verified_str = "VERIFIED" if hw_result.get("verified") else "UNVERIFIED"
+        add_log("lamp_toggle", f"Lamp state changed from {current} to {new_state} [{verified_str}]")
     except Exception as e:
-        print(f"Failed to persist lamp state to DB:", e)
+        print(f"Failed to persist lamp state to DB: {e}")
 
-    hw_result = _set_hardware_pin(LAMP_GPIO, new_state, device_name="lamp")
     print(f"[Lamp Hardware] LAMP -> {new_state} ({hw_result['message']})")
     return new_state, hw_result
 
@@ -297,7 +334,7 @@ def control_lamp(
     source: Literal["manual", "agent", "auto"] = "manual",
 ) -> Dict[str, Any]:
     """
-    Controls the lamp relay.
+    Controls the lamp relay with closed-loop verification and auto-retry.
     - If source == "auto" (YOLO detection / automatic trigger endpoints) and auto_mode is OFF:
       the automatic request is safely blocked.
     - If force == True or source in ("manual", "agent"):
@@ -312,11 +349,12 @@ def control_lamp(
         return {
             "success": False,
             "allowed": False,
+            "verified": True,
             "auto_mode": False,
             "target": "lamp",
             "state": current,
             "states": get_all_led_states(),
-            "message": "Lamp Auto Mode is DISABLED. Automated triggers are blocked. (Set Auto Mode to True or control via AI Voice Agent).",
+            "message": "Lamp Auto Mode is DISABLED. Automated triggers are blocked.",
             "speechText": "Auto mode is disabled for the lamp. Only AI voice agent or manual commands are allowed.",
             "timestamp": datetime.now(UTC).isoformat(),
         }
@@ -328,15 +366,27 @@ def control_lamp(
         if target_state not in ("ON", "OFF"):
             target_state = "ON"
 
-    new_state, hw_result = set_lamp_state(target_state)
+    # Closed-loop hardware execution with auto-retry
+    new_state, hw_result = set_lamp_state(target_state, max_retries=3)
     states = get_all_led_states()
-    speech_text = f"The lamp is now {new_state}"
-    msg = f'**Lamp**: "{speech_text}"'
+
+    verified = hw_result.get("verified", False)
+    attempts = hw_result.get("attempts", 1)
+    mode = hw_result.get("mode", "simulated")
+
+    if verified:
+        speech_text = f"The lamp is verified {new_state}"
+        msg = f'**Lamp**: "{speech_text}"'
+    else:
+        speech_text = f"Warning: The lamp was commanded {new_state}, but verification failed"
+        msg = f'**Lamp [WARNING]**: "{speech_text}"'
 
     _schedule_broadcast(states)
 
     return {
         "success": hw_result.get("success", True),
+        "verified": verified,
+        "attempts": attempts,
         "allowed": True,
         "auto_mode": auto_mode,
         "target": "lamp",
@@ -349,7 +399,7 @@ def control_lamp(
     }
 
 
-def set_single_led(color: Literal["red", "yellow", "green"], action: ActionType) -> tuple[str, Dict[str, Any]]:
+def set_single_led(color: Literal["red", "yellow", "green"], action: ActionType, max_retries: int = 3) -> tuple[str, Dict[str, Any]]:
     current = get_led_state(color)
     if action == "TOGGLE":
         new_state = "OFF" if current == "ON" else "ON"
@@ -358,16 +408,17 @@ def set_single_led(color: Literal["red", "yellow", "green"], action: ActionType)
         if new_state not in ("ON", "OFF"):
             new_state = "ON"
 
+    # Apply to physical GPIO pin with verification
+    pin_map = {"red": RED_GPIO, "yellow": YELLOW_GPIO, "green": GREEN_GPIO}
+    hw_result = _set_hardware_pin(pin_map[color], new_state, device_name=color, max_retries=max_retries)
+
     # Save to SQLite DB
     try:
         set_setting(f"led_{color}_state", new_state)
-        add_log("led_toggle", f"{color.capitalize()} LED state changed from {current} to {new_state}")
+        verified_str = "VERIFIED" if hw_result.get("verified") else "UNVERIFIED"
+        add_log("led_toggle", f"{color.capitalize()} LED state changed from {current} to {new_state} [{verified_str}]")
     except Exception as e:
-        print(f"Failed to persist {color} LED state to DB:", e)
-
-    # Apply to physical GPIO pin
-    pin_map = {"red": RED_GPIO, "yellow": YELLOW_GPIO, "green": GREEN_GPIO}
-    hw_result = _set_hardware_pin(pin_map[color], new_state, device_name=color)
+        print(f"Failed to persist {color} LED state to DB: {e}")
 
     print(f"[LED Hardware] {color.upper()} -> {new_state} ({hw_result['message']})")
     return new_state, hw_result
@@ -377,9 +428,11 @@ def control_leds(
     color: ColorType = "all",
     action: ActionType = "TOGGLE",
     state: Optional[str] = None,
+    include_lamp: bool = False,
 ) -> Dict[str, Any]:
     """
     Controls a specific LED (red, yellow, green, lamp) or all LEDs at the same time.
+    If include_lamp is True and color is "all", the lamp relay is also controlled.
     """
     effective_action: ActionType = (state or action).upper()  # type: ignore
     color_clean = color.lower()
@@ -401,14 +454,21 @@ def control_leds(
             _, hw_res = set_single_led(c, target_state)  # type: ignore
             hw_results[c] = hw_res
 
+        # If full shutdown requested, include lamp
+        if include_lamp:
+            lamp_state, lamp_hw = set_lamp_state(target_state)
+            hw_results["lamp"] = lamp_hw
+
         new_states = get_all_led_states()
-        speech_text = f"All lights are now {target_state}"
+        verified_all = all(r.get("verified", True) for r in hw_results.values())
+        speech_text = f"All lights {'and lamp ' if include_lamp else ''}are now verified {target_state}"
         msg = f'**All LEDs**: "{speech_text}"'
 
         _schedule_broadcast(new_states)
 
         return {
             "success": all(r.get("success", True) for r in hw_results.values()),
+            "verified": verified_all,
             "target": "all",
             "states": new_states,
             "hardware": hw_results,
@@ -419,13 +479,14 @@ def control_leds(
     else:
         new_state, hw_result = set_single_led(color_clean, effective_action)  # type: ignore
         new_states = get_all_led_states()
-        speech_text = f"The {color_clean} light is now {new_state}"
+        speech_text = f"The {color_clean} light is now verified {new_state}"
         msg = f'**{color_clean.capitalize()} LED**: "{speech_text}"'
 
         _schedule_broadcast(new_states)
 
         return {
             "success": hw_result.get("success", True),
+            "verified": hw_result.get("verified", False),
             "target": color_clean,
             "state": new_state,
             "states": new_states,

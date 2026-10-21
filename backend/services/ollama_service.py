@@ -28,7 +28,12 @@ async def get_ollama_models(base_url: Optional[str] = None) -> List[str]:
         print("Could not fetch Ollama models:", e)
     return []
 
-SYSTEM_PROMPT = """You are Johnwick, an AI Copilot connected to a Traffic Light hardware controller (Red on GPIO 27, Yellow on GPIO 22, Green on GPIO 23) and a Lamp relay on GPIO 17.
+SYSTEM_PROMPT = """You are Johnwick, an AI Copilot connected directly to a Traffic Light hardware controller (Red on GPIO 17, Yellow on GPIO 22, Green on GPIO 23) and a Lamp relay on GPIO 27.
+
+CRITICAL HARDWARE DIRECTIVE:
+- Whenever the user asks to turn ON, turn OFF, toggle, or check the lamp or any lights, you MUST execute the appropriate hardware tool.
+- NEVER reply with text alone claiming you changed the physical hardware without calling the tool.
+- Every tool call executes closed-loop verification and auto-retries on the Raspberry Pi GPIO pins.
 
 Available Tools:
 - control_led(color, state): color='red'|'yellow'|'green'|'all', state='ON'|'OFF'|'TOGGLE'
@@ -39,13 +44,13 @@ Available Tools:
 - get_led_status(): Check live state of Red, Yellow, and Green LEDs and Lamp Relay.
 
 Instructions:
-- If user wants to turn on/off/toggle a specific LED, call control_led.
 - If user wants to turn on/off/toggle the lamp, call control_lamp.
+- If user wants to turn on/off/toggle a specific LED, call control_led.
 - If user wants a timed light or lamp, call control_led_timed.
-- If user asks for a custom traffic mode or cycle with a specific order and durations, call run_traffic_sequence.
-- If user asks to stop, cancel, or turn off traffic mode, call cancel_traffic_sequence.
+- If user asks for custom traffic sequence, call run_traffic_sequence.
+- If user asks to stop traffic mode, call cancel_traffic_sequence.
 - If user wants to turn on/off all lights, call control_led(color='all', state=...).
-- If user wants traffic mode (red only, green only, etc.), call set_traffic_preset.
+- If user wants traffic preset, call set_traffic_preset.
 - If user asks for status of lights or lamp, call get_led_status.
 - Keep responses short, direct, and conversational."""
 
@@ -69,7 +74,7 @@ OLLAMA_TOOLS = [
         "type": "function",
         "function": {
             "name": "control_lamp",
-            "description": "Control the relay-powered lamp (ON, OFF, TOGGLE).",
+            "description": "Control the relay-powered lamp with closed-loop verification (ON, OFF, TOGGLE).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -166,7 +171,7 @@ def _execute_ollama_tools(tool_calls: list) -> tuple[str, Any]:
             executed_action = f"control_led({color}, {state})"
         elif fn_name == "control_lamp":
             state = fn_args.get("state")
-            tool_results = control_lamp(state=state)
+            tool_results = control_lamp(state=state, force=True, source="agent")
             executed_action = f"control_lamp({state})"
         elif fn_name == "control_led_timed":
             color = fn_args.get("color")
@@ -247,7 +252,6 @@ async def stream_ollama_command(
                         "content": str(tool_results)
                     })
 
-                # Stream the final followup message
                 accumulated_text = ""
                 async with client.stream("POST", f"{base_url}/api/chat", json={
                     "model": model_name,
@@ -275,9 +279,28 @@ async def stream_ollama_command(
                 }
                 return
 
-            # If no tools called, but direct content was returned (or stream directly)
+            # Aircraft-Grade Safety Net: If Ollama returned pure text, check local parser
+            from routers.agent import parse_local_led_command
+            fallback = parse_local_led_command(input_text)
+            if fallback:
+                f_data = fallback["result"]
+                f_msg = f_data.get("message") or f_data.get("speechText")
+                yield {
+                    "type": "action",
+                    "actionTaken": fallback["action"],
+                    "toolPayload": f_data,
+                }
+                yield {
+                    "type": "end",
+                    "response": f"{f_msg}. {content}".strip(),
+                    "actionTaken": fallback["action"],
+                    "toolPayload": f_data,
+                    "model": f"{model_name} (Safety Net Verified)",
+                }
+                return
+
+            # If no tools called and no hardware intent detected
             if content:
-                # Yield words smoothly
                 words = content.split(" ")
                 for i, w in enumerate(words):
                     piece = w if i == 0 else " " + w

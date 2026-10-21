@@ -79,6 +79,22 @@ async def handle_realtime_audio(
         if user_transcript:
             add_log("realtime_command", f'Processing transcript: "{user_transcript}"')
 
+            # Aircraft-grade fast path: check local verified execution first
+            local_match = parse_local_led_command(user_transcript)
+            if local_match:
+                res_data = local_match["result"]
+                return {
+                    "success": res_data.get("success", True),
+                    "command": user_transcript,
+                    "response": res_data.get("message", "Command verified and executed."),
+                    "actionTaken": local_match["action"],
+                    "payload": res_data,
+                    "audioFile": filename,
+                    "transcript": user_transcript,
+                    "model": "Local Hardware Engine (Verified)",
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+
             # Direct Ollama Mode
             if engineMode == "ollama":
                 try:
