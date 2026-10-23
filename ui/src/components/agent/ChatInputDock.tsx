@@ -1,8 +1,8 @@
 'use client';
 
 import { useAtomValue } from 'jotai';
-import { Send, CornerDownLeft, Compass } from 'lucide-react';
-import { engineModeAtom, selectedOllamaModelAtom } from '@/lib/atoms';
+import { CornerDownLeft, Sparkles } from 'lucide-react';
+import { realtimeSessionStateAtom } from '@/lib/atoms';
 
 interface ChatInputDockProps {
   inputText: string;
@@ -17,11 +17,11 @@ export function ChatInputDock({
   isLoading,
   handleSendMessage,
 }: ChatInputDockProps) {
-  const engineMode = useAtomValue(engineModeAtom);
-  const selectedOllamaModel = useAtomValue(selectedOllamaModelAtom);
+  const sessionState = useAtomValue(realtimeSessionStateAtom);
+  const isHearingVoice = sessionState === 'recording';
 
   return (
-    <div className="p-2 sm:p-3 border-t border-cyan-500/30 bg-cyan-950/50 text-cyan-200">
+    <div className="p-3 border-t border-[#2e2e2e] bg-[#202020] text-[#e3e2de]">
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -29,51 +29,63 @@ export function ChatInputDock({
         }}
         className="flex items-center gap-2"
       >
-        {/* Terminal Command Input Prompt */}
-        <div className="relative flex-1 flex items-center bg-slate-950/80 border border-cyan-500/40 rounded-xs focus-within:border-cyan-400 focus-within:shadow-[0_0_10px_rgba(0,240,255,0.3)] transition-all">
-          <div className="px-2.5 text-cyan-400 font-mono text-xs font-bold shrink-0 select-none">
-            JOHNWICK&gt;
+        {/* Notion-style AI Prompt Bar */}
+        <div className={`relative flex-1 flex items-center bg-[#252525] border rounded-lg transition-all ${
+          isHearingVoice
+            ? 'border-emerald-500/70 shadow-sm'
+            : 'border-[#333333] focus-within:border-[#4d4d4d] focus-within:bg-[#282828]'
+        }`}>
+          <div className="pl-3 pr-1 text-[#8f8e8a] shrink-0 select-none">
+            <Sparkles className="w-3.5 h-3.5 text-[#9b9a97]" />
           </div>
-          <input
-            type="text"
-            className="w-full bg-transparent py-2 pr-3 text-xs text-cyan-100 font-mono placeholder:text-cyan-600/70 focus:outline-none"
-            placeholder={
-              engineMode === 'ollama'
-                ? `EXECUTE_COMMAND (${selectedOllamaModel})...`
-                : 'EXECUTE_COMMAND (GEMINI_FLASH)...'
-            }
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-          />
+
+          <div className="flex-1 flex items-center min-w-0 pr-2">
+            <input
+              type="text"
+              className="w-full bg-transparent py-2.5 px-2 text-xs sm:text-sm text-[#ecebed] placeholder:text-[#787774] focus:outline-none font-sans"
+              placeholder={
+                isHearingVoice
+                  ? 'Listening to speech...'
+                  : 'Ask AI or type a hardware command (e.g. "turn on green light")...'
+              }
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+            />
+            {isHearingVoice && (
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[#1d2d1d] text-[#4ade80] border border-[#254d25] text-xs shrink-0 animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                <span>Listening</span>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Transmit Button */}
+        {/* Send Button */}
         <button
           type="submit"
           disabled={isLoading || !inputText.trim()}
-          className="px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-mono text-xs font-bold rounded-xs flex items-center gap-1.5 transition-all disabled:opacity-30 disabled:pointer-events-none hover:shadow-[0_0_12px_rgba(0,240,255,0.5)] shrink-0 cursor-pointer"
+          className="px-3.5 py-2.5 bg-[#ecebed] hover:bg-white text-[#191919] font-medium text-xs sm:text-sm rounded-lg flex items-center gap-1.5 transition-all disabled:opacity-30 disabled:pointer-events-none shrink-0 cursor-pointer"
         >
           {isLoading ? (
-            <div className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+            <div className="w-4 h-4 border-2 border-[#191919] border-t-transparent rounded-full animate-spin" />
           ) : (
             <>
-              <Send className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">TRANSMIT</span>
-              <CornerDownLeft className="w-2.5 h-2.5 opacity-60 ml-0.5 hidden sm:inline" />
+              <span>Send</span>
+              <CornerDownLeft className="w-3 h-3 opacity-60 hidden sm:inline" />
             </>
           )}
         </button>
       </form>
 
-      {/* Helpful HUD footer with Chrome recommendation */}
-      <div className="flex items-center justify-between text-[10px] font-mono text-cyan-500/80 mt-1.5 px-0.5 select-none">
+      {/* Footer Helper Note */}
+      <div className="flex items-center justify-between text-xs text-[#787774] mt-2 px-1 select-none">
         <span className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_4px_#00f0ff]" />
-          <span>Speak anytime — auto-sends 1s after you stop</span>
-        </span>
-        <span className="hidden sm:flex items-center gap-1 text-cyan-400/70">
-          <Compass className="w-3 h-3 text-cyan-300 shrink-0" />
-          <span>Recommended Browser: <strong className="text-cyan-200 font-semibold tracking-wide">Google Chrome</strong></span>
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          <span>
+            {isHearingVoice
+              ? 'Hearing voice — pause for 1s to auto-send'
+              : 'Press Enter to send or speak with microphone'}
+          </span>
         </span>
       </div>
     </div>

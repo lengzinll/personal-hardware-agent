@@ -5,6 +5,7 @@ export interface RecordedAudioResult {
   blob: Blob | null;
   durationMs: number;
   speechFramesCount: number;
+  chunksCount?: number;
   isValidSpeech: boolean;
   rejectReason?: string;
 }
@@ -27,12 +28,12 @@ export class AudioRecorder {
   private speechFramesCount: number = 0;
   private onVolumeChange?: (level: number, isSpeech: boolean) => void;
 
-  // Adaptive Noise Filter variables
-  private noiseFloor: number = 0.008;
-  private minIntentionalThreshold: number = 0.025; // Filters out quiet ambient room noise and fan hum
+  // Adaptive Noise Filter variables — Calibrated for intentional LOUD / clear speech
+  private noiseFloor: number = 0.012;
+  private minIntentionalThreshold: number = 0.055; // Increased from 0.024 -> 0.055 (requires clear, loud speech)
   private consecutiveSpeechFrames: number = 0;
-  private readonly minFramesForSpeech: number = 2; // ~90ms of sustained speech energy
-  private readonly minUtteranceDurationMs: number = 350;
+  private readonly minFramesForSpeech: number = 3; // ~260ms sustained loud speech energy (rejects coughs, clicks, typing)
+  private readonly minUtteranceDurationMs: number = 250;
 
   /**
    * Checks whether the browser and current context support mediaDevices.getUserMedia and Web Audio.
@@ -48,6 +49,17 @@ export class AudioRecorder {
       window.AudioContext || (window as any).webkitAudioContext
     );
     return hasMediaDevices && hasAudioContext;
+  }
+
+  public async resumeAudioContext(): Promise<void> {
+    if (this.audioContext && this.audioContext.state === 'suspended') {
+      try {
+        await this.audioContext.resume();
+        console.log('[WebAudio] AudioContext successfully resumed from user gesture.');
+      } catch (e) {
+        console.warn('[WebAudio] AudioContext resume failed:', e);
+      }
+    }
   }
 
   public async initStream(onVolumeChange?: (level: number, isSpeech: boolean) => void): Promise<MediaStream> {
@@ -74,12 +86,12 @@ export class AudioRecorder {
     }
 
     if (!this.mediaStream) {
-      console.log('[WebAudio] Initializing mic with hardware noise suppression & echo cancellation (autoGainControl disabled)...');
+      console.log('[WebAudio] Initializing mic with echo cancellation, noise suppression & AGC...');
       this.mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: false, // Disables AGC so microphone does not amplify ambient room noise
+          autoGainControl: true, // Enabled for responsive voice pickup
           channelCount: 1,
         },
       });
@@ -95,29 +107,31 @@ export class AudioRecorder {
     }
 
     if (this.audioContext.state === 'suspended') {
-      await this.audioContext.resume();
+      try {
+        await this.audioContext.resume();
+      } catch {}
     }
 
     if (!this.sourceNode) {
       this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
 
-      // 1. Highpass Filter: Cut low-frequency AC rumble, fan hum, & vibration (< 120 Hz)
+      // 1. Highpass Filter: Cut low-frequency AC rumble, fan hum, & vibration (< 80 Hz)
       this.highpassFilter = this.audioContext.createBiquadFilter();
       this.highpassFilter.type = 'highpass';
-      this.highpassFilter.frequency.setValueAtTime(120, this.audioContext.currentTime);
+      this.highpassFilter.frequency.setValueAtTime(140, this.audioContext.currentTime); // Cut AC/fan hum and desk vibration
       this.highpassFilter.Q.setValueAtTime(0.7, this.audioContext.currentTime);
 
-      // 2. Lowpass Filter: Cut high-frequency hiss and room reflections (> 3800 Hz)
+      // 2. Lowpass Filter: Cut high-frequency hiss and room reflections (> 4200 Hz)
       this.lowpassFilter = this.audioContext.createBiquadFilter();
       this.lowpassFilter.type = 'lowpass';
-      this.lowpassFilter.frequency.setValueAtTime(3800, this.audioContext.currentTime);
+      this.lowpassFilter.frequency.setValueAtTime(3600, this.audioContext.currentTime); // Cut high-frequency hiss
       this.lowpassFilter.Q.setValueAtTime(0.7, this.audioContext.currentTime);
 
       // 3. Dynamics Compressor: Smooth peaks and level intentional voice
       this.compressorNode = this.audioContext.createDynamicsCompressor();
       this.compressorNode.threshold.setValueAtTime(-32, this.audioContext.currentTime);
       this.compressorNode.knee.setValueAtTime(12, this.audioContext.currentTime);
-      this.compressorNode.ratio.setValueAtTime(4, this.audioContext.currentTime);
+      this.compressorNode.ratio.setValueAtTime(3.5, this.audioContext.currentTime);
       this.compressorNode.attack.setValueAtTime(0.003, this.audioContext.currentTime);
       this.compressorNode.release.setValueAtTime(0.25, this.audioContext.currentTime);
 
@@ -157,7 +171,7 @@ export class AudioRecorder {
 
         const dynamicSpeechThreshold = Math.max(
           this.minIntentionalThreshold,
-          this.noiseFloor * 2.5
+          this.noiseFloor * 3.2
         );
 
         let isIntentionalSpeech = false;
@@ -167,6 +181,9 @@ export class AudioRecorder {
             isIntentionalSpeech = true;
             if (this.isRecording) {
               this.speechFramesCount++;
+            }
+            if (this.speechFramesCount % 4 === 1) {
+              console.log(`%c[🎙️ VOICE ENERGY]: RMS=${rms.toFixed(3)} | Threshold=${dynamicSpeechThreshold.toFixed(3)}`, 'color: #38bdf8;');
             }
           }
         } else {
@@ -195,6 +212,10 @@ export class AudioRecorder {
     return this.mediaStream;
   }
 
+  /**
+   * Full pause: stops buffering AND disables mic track.
+   * Use this when TTS is playing to prevent echo feedback.
+   */
   public pauseListening(): void {
     this.isPaused = true;
     this.isRecording = false;
@@ -205,6 +226,19 @@ export class AudioRecorder {
         t.enabled = false;
       });
     }
+  }
+
+  /**
+   * Soft pause: stops buffering chunks but KEEPS the mic track alive.
+   * VAD (onaudioprocess) keeps running so the next speech is detected immediately.
+   * Use this during Whisper transcription so the user can speak again right after.
+   */
+  public stopBuffering(): void {
+    this.isRecording = false;
+    this.recordedChunks = [];
+    this.preRollBuffer = [];
+    // NOTE: mic track stays enabled, isPaused stays false — VAD keeps firing
+    console.log('[WebAudio] stopBuffering: chunks cleared, mic & VAD still active.');
   }
 
   public resumeListening(): void {
@@ -220,7 +254,11 @@ export class AudioRecorder {
   }
 
   public startRecording(): void {
-    if (this.isRecording || this.isPaused) return;
+    console.log(`[WebAudio] startRecording called — isRecording=${this.isRecording} isPaused=${this.isPaused} micEnabled=${this.mediaStream?.getAudioTracks()[0]?.enabled ?? 'n/a'}`);
+    if (this.isRecording || this.isPaused) {
+      console.warn(`[WebAudio] startRecording BAILED — isRecording=${this.isRecording} isPaused=${this.isPaused}`);
+      return;
+    }
     console.log('[WebAudio] Started buffering filtered audio for WAV export...');
     this.recordedChunks = [...this.preRollBuffer];
     this.speechFramesCount = this.preRollBuffer.length;
@@ -229,15 +267,20 @@ export class AudioRecorder {
   }
 
   public stopRecording(): RecordedAudioResult {
+    const chunksLen = this.recordedChunks.length;
+    const wasRec = this.isRecording;
     this.isRecording = false;
-    const durationMs = Date.now() - this.recordingStartTime;
+    const durationMs = this.recordingStartTime ? Date.now() - this.recordingStartTime : 0;
     const speechFrames = this.speechFramesCount;
 
-    if (this.recordedChunks.length === 0) {
+    console.log(`[WebAudio] stopRecording called — wasRecording=${wasRec}, chunks=${chunksLen}, duration=${durationMs}ms, speechFrames=${speechFrames}`);
+
+    if (chunksLen === 0) {
       return {
         blob: null,
         durationMs: 0,
         speechFramesCount: 0,
+        chunksCount: 0,
         isValidSpeech: false,
         rejectReason: 'empty_buffer',
       };
@@ -258,9 +301,9 @@ export class AudioRecorder {
     this.recordedChunks = [];
     this.speechFramesCount = 0;
 
-    // Minimum Duration & Energy Gate: Rejects short transient noises (< 350ms or < 2 speech chunks)
-    if (durationMs < this.minUtteranceDurationMs || speechFrames < 1) {
-      console.log(`[Noise Gate] 🚫 Discarded transient noise (Duration: ${durationMs}ms, Speech Frames: ${speechFrames} - below utterance threshold).`);
+    // Minimum Duration: Discard accidental transient click (< 180ms or empty)
+    if (durationMs < this.minUtteranceDurationMs || totalLength < 1600) {
+      console.log(`[Noise Gate] 🚫 Discarded transient noise (Duration: ${durationMs}ms, Samples: ${totalLength}).`);
       return {
         blob: null,
         durationMs,

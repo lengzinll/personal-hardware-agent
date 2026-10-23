@@ -372,7 +372,6 @@ def control_lamp(
 
     verified = hw_result.get("verified", False)
     attempts = hw_result.get("attempts", 1)
-    mode = hw_result.get("mode", "simulated")
 
     if verified:
         speech_text = f"The lamp is verified {new_state}"

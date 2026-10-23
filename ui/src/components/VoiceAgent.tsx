@@ -28,8 +28,8 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
     {
       id: 'welcome',
       sender: 'agent',
-      text: "SYSTEM INITIALIZED: Johnwick Neural Interface Online. Speak any command (e.g. 'Turn on lamp', 'Turn on red light', 'Run traffic cycle green 10s yellow 3s red 5s').\n\n*(Tip: **Google Chrome** is recommended for the most responsive voice recognition and speech synthesis).* ",
-      modelUsed: 'JOHNWICK_SYNAPSE_CORE',
+      text: "👋 **Hello!** I'm your Johnwick Assistant. I can control your physical lights and relays via voice or chat.\n\n**Try saying or typing:**\n- *\"Turn on the green light\"*\n- *\"Turn on desk lamp\"*\n- *\"Run traffic cycle: green 10s, yellow 3s, red 5s\"*\n- *\"Check status\"*",
+      modelUsed: 'Assistant',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
     },
   ]);
@@ -42,7 +42,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
   const [selectedOllamaModel, setSelectedOllamaModel] = useAtom(selectedOllamaModelAtom);
   const ttsEnabled = useAtomValue(ttsEnabledAtom);
   const [, setSpeakingId] = useAtom(ttsSpeakingIdAtom);
-  const sessionState = useAtomValue(realtimeSessionStateAtom);
+  const [sessionState, setSessionState] = useAtom(realtimeSessionStateAtom);
 
   const { sendAgentCommand } = useLedWebSocket();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -59,7 +59,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
   useEffect(() => {
     async function fetchModels() {
       try {
-        const res = await fetch('/api/system/ollama-models');
+        const res = await fetch('/api/system/ollama/models');
         if (res.ok) {
           const data = await res.json();
           if (data.models && data.models.length > 0) {
@@ -94,7 +94,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
     setInputText(liveText);
   }, []);
 
-  // Realtime two-way voice hook with auto-fill into input box
+  // Realtime two-way voice hook
   const { toggleRealtime, manualPushToTalk, handleInterrupt } = useRealtimeSession({
     onNewMessage: handleNewRealtimeMessage,
     onRefreshData,
@@ -109,6 +109,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
     const userText = inputText.trim();
     setInputText('');
     setIsLoading(true);
+    setSessionState('processing');
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -128,7 +129,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
       }));
 
     const agentMsgId = (Date.now() + 1).toString();
-    const modelDisplayName = engineMode === 'ollama' ? `OLLAMA:${selectedOllamaModel}` : 'GEMINI_FLASH';
+    const modelDisplayName = engineMode === 'ollama' ? `Ollama (${selectedOllamaModel})` : 'Gemini Flash';
 
     try {
       // Send agent command over WebSocket with real-time UI token streaming
@@ -138,6 +139,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
         ollamaModel: selectedOllamaModel,
         history: historyPayload,
         onStreamStart: () => {
+          setSessionState('speaking');
           handleNewRealtimeMessage({
             id: agentMsgId,
             sender: 'agent',
@@ -189,11 +191,11 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
         handleNewRealtimeMessage(agentMsg);
 
         if (data.actionTaken) {
-          toast.success('⚡ HARDWARE_COMMITTED', { description: replyText });
+          toast.success('Action executed', { description: replyText });
           if (onRefreshData) onRefreshData();
         }
 
-        // Trigger TTS playback ONLY AFTER streaming is fully finished
+        // Trigger TTS playback if enabled
         if (ttsEnabled && replyText) {
           setSpeakingId(agentMsgId);
           playBackendTTS(
@@ -213,66 +215,67 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
         const errorAgentMsg: ChatMessage = {
           id: agentMsgId,
           sender: 'agent',
-          text: `⚠️ **EXECUTION_ERROR**: ${errMsg}`,
+          text: `⚠️ **Error**: ${errMsg}`,
           isStreaming: false,
           modelUsed: modelDisplayName,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         };
         handleNewRealtimeMessage(errorAgentMsg);
-        toast.error('COMMAND_FAILED', { description: errMsg });
+        toast.error('Command failed', { description: errMsg });
       }
     } catch (err: any) {
-      const errorMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+      const errorAgentMsg: ChatMessage = {
+        id: agentMsgId,
         sender: 'agent',
-        text: `⚠️ **SYSTEM_FAULT**: ${err.message || 'Network failure'}`,
+        text: `⚠️ **Connection Error**: ${err?.message || 'Could not reach server'}`,
         isStreaming: false,
+        modelUsed: modelDisplayName,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       };
-      handleNewRealtimeMessage(errorMsg);
+      handleNewRealtimeMessage(errorAgentMsg);
+      toast.error('Network error', { description: err?.message || 'Please check connection' });
     } finally {
       setIsLoading(false);
+      setSessionState('standby');
     }
   };
 
   const handleCopyMessage = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
-    toast.success('COPIED_TO_CLIPBOARD');
+    toast.success('Copied to clipboard');
     setTimeout(() => setCopiedId(null), 2000);
   };
 
   const handleClearChatHistory = () => {
-    stopTTS();
-    setSpeakingId(null);
     setMessages([
       {
         id: 'welcome_reset',
         sender: 'agent',
-        text: 'LOGS PURGED. Neural registers clear. Speak any command anytime.',
-        modelUsed: 'JOHNWICK_SYNAPSE_CORE',
+        text: 'Chat history cleared. How can I help you next?',
+        modelUsed: 'Assistant',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       },
     ]);
-    toast.info('BUFFER_RESET');
+    toast.info('Chat history cleared');
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-950/90 border border-cyan-500/40 rounded-xs overflow-hidden shadow-[0_0_20px_rgba(0,240,255,0.15)] backdrop-blur-md">
-      {/* HUD Header */}
+    <div className="flex flex-col h-full bg-[#202020] border border-[#2e2e2e] rounded-lg overflow-hidden shadow-xs">
+      {/* Header */}
       <VoiceAgentHeader
         ollamaModels={ollamaModels}
         clearChatHistory={handleClearChatHistory}
       />
 
-      {/* Realtime Status Ribbon */}
+      {/* Realtime Status Bar */}
       <RealtimeStatusBar
         toggleRealtime={toggleRealtime}
         manualPushToTalk={manualPushToTalk}
         handleInterrupt={handleInterrupt}
       />
 
-      {/* Main Terminal Message Feed */}
+      {/* Messages */}
       <ChatMessageList
         messages={messages}
         isLoading={isLoading}
@@ -281,7 +284,7 @@ export function VoiceAgent({ onRefreshData }: VoiceAgentProps) {
         messagesEndRef={messagesEndRef}
       />
 
-      {/* Command Input Dock */}
+      {/* Input Dock */}
       <ChatInputDock
         inputText={inputText}
         setInputText={setInputText}

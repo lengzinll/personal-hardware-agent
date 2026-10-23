@@ -4,6 +4,10 @@ import { EngineMode } from '@/components/agent/types';
 export const engineModeAtom = atom<EngineMode>('ollama');
 export const selectedOllamaModelAtom = atom<string>('ornith-1.5:9b');
 
+// STT Engine: Browser native Web Speech API (English)
+export type SttEngine = 'browser';
+export const sttEngineAtom = atom<SttEngine>('browser');
+
 // TTS Atoms
 export const ttsEnabledAtom = atom<boolean>(true);
 export const ttsSpeakingIdAtom = atom<string | null>(null);
@@ -28,15 +32,15 @@ export const ledWebSocketConnectedAtom = atom<boolean>(false);
 // Realtime Voice & Wake Word Conversation Atoms
 export type RealtimeSessionState =
   | 'uninitialized'
-  | 'standby'        // Silently listening for wake word "Hello Johnwick"
+  | 'standby'        // Silently listening for wake word or voice
   | 'session_active' // Session active, listening for commands
-  | 'recording'      // Actively recording audio buffer to WAV
-  | 'processing'     // Uploading WAV & running AI
+  | 'recording'      // Actively hearing user voice
+  | 'processing'     // Processing command with AI
   | 'speaking'       // AI is answering (barge-in interruptible)
   | 'muted';
 
 export const realtimeEnabledAtom = atom<boolean>(true);
-export const realtimeSessionStateAtom = atom<RealtimeSessionState>('standby');
+export const realtimeSessionStateAtom = atom<RealtimeSessionState>('uninitialized');
 export const realtimeVolumeAtom = atom<number>(0);
-export const wakeWordAtom = atom<string>('Hello Johnwick');
+export const wakeWordAtom = atom<string>('hello johnwick');
 export const lastHeardTranscriptAtom = atom<string>('');

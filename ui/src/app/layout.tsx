@@ -1,20 +1,9 @@
 import type { Metadata } from "next";
-import { Orbitron, Share_Tech_Mono, Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { LedWebSocketProvider } from "@/lib/LedWebSocketProvider";
 import { Toaster } from "sonner";
-
-const orbitron = Orbitron({
-  variable: "--font-orbitron",
-  subsets: ["latin"],
-});
-
-const shareTechMono = Share_Tech_Mono({
-  weight: "400",
-  variable: "--font-share-tech-mono",
-  subsets: ["latin"],
-});
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,17 +16,17 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Johnwick - Neural Hardware HUD",
-  description: "Futuristic Sci-Fi Holographic Hardware Interface",
+  title: "Johnwick - Hardware Agent",
+  description: "Personal Hardware Control & AI Assistant",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
-      className={`dark ${orbitron.variable} ${shareTechMono.variable} ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`dark ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-[#020710] text-[#00f0ff] font-mono selection:bg-[#00f0ff]/30 selection:text-[#ffffff]">
+      <body className="min-h-full flex flex-col bg-[#191919] text-[#e3e2de] font-sans selection:bg-neutral-700 selection:text-white">
         <QueryProvider>
           <LedWebSocketProvider>
             {children}

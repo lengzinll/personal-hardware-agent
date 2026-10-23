@@ -3,29 +3,33 @@
 import { useEffect } from 'react';
 import { useAtom } from 'jotai';
 import { ledStatesAtom, ledWebSocketConnectedAtom } from '@/lib/atoms';
-import { useLedWebSocket } from '@/lib/useLedWebSocket';
+import { useLedWebSocketInternal, LedWebSocketContext } from '@/lib/useLedWebSocket';
 
 /**
- * Provider component that syncronizes WebSocket LED state with Jotai atoms.
- * Place this near the root of your app to enable global LED state access.
+ * Provider component that maintains a single, shared WebSocket connection,
+ * synchronizes LED state with Jotai atoms, and provides the connection to all child components.
  */
 export function LedWebSocketProvider({ children }: { children: React.ReactNode }) {
   const [, setLedStates] = useAtom(ledStatesAtom);
   const [, setIsConnected] = useAtom(ledWebSocketConnectedAtom);
 
-  // Get WebSocket data
-  const { ledStates, isConnected } = useLedWebSocket();
+  // Single shared WebSocket instance for the whole application
+  const ws = useLedWebSocketInternal();
 
   // Sync WebSocket state to Jotai atoms
   useEffect(() => {
-    setLedStates(ledStates);
-  }, [ledStates, setLedStates]);
+    setLedStates(ws.ledStates);
+  }, [ws.ledStates, setLedStates]);
 
   useEffect(() => {
-    setIsConnected(isConnected);
-  }, [isConnected, setIsConnected]);
+    setIsConnected(ws.isConnected);
+  }, [ws.isConnected, setIsConnected]);
 
-  return <>{children}</>;
+  return (
+    <LedWebSocketContext.Provider value={ws}>
+      {children}
+    </LedWebSocketContext.Provider>
+  );
 }
 
 /**

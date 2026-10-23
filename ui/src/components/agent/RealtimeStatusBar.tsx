@@ -1,7 +1,7 @@
 'use client';
 
 import { useAtomValue } from 'jotai';
-import { Mic, MicOff, Volume2, Square, Zap, Radio, Sparkles, AudioLines } from 'lucide-react';
+import { Mic, MicOff, Square, Radio, AudioLines } from 'lucide-react';
 import {
   realtimeEnabledAtom,
   realtimeSessionStateAtom,
@@ -30,87 +30,85 @@ export function RealtimeStatusBar({
   const getStatusBadge = () => {
     if (!realtimeEnabled || sessionState === 'muted') {
       return {
-        label: 'VOICE_STANDBY: MUTED',
-        color: 'text-zinc-400 bg-zinc-900/60 border-zinc-700',
-        dot: 'bg-zinc-500',
+        label: 'Microphone Muted',
+        color: 'text-[#8f8e8a] bg-[#262626] border-[#333333]',
+        dot: 'bg-[#555555]',
       };
     }
     if (sessionState === 'standby') {
       return {
-        label: `LISTENING FOR "${wakeWord.toUpperCase()}"`,
-        color: 'text-cyan-300 bg-cyan-950/60 border-cyan-500/40 shadow-[0_0_8px_rgba(0,240,255,0.2)]',
-        dot: 'bg-cyan-400 animate-pulse',
+        label: `Listening for "${wakeWord}"`,
+        color: 'text-[#81c784] bg-[#1e2920] border-[#2e4030]',
+        dot: 'bg-emerald-400',
       };
     }
     if (sessionState === 'session_active') {
       return {
-        label: 'SESSION_ACTIVE: LISTENING',
-        color: 'text-emerald-300 bg-emerald-950/60 border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.3)]',
-        dot: 'bg-emerald-400 animate-ping',
+        label: 'Active • Listening for command',
+        color: 'text-[#81c784] bg-[#1e2920] border-[#2e4030]',
+        dot: 'bg-emerald-400 animate-pulse',
       };
     }
     if (sessionState === 'recording') {
       return {
-        label: 'CAPTURING_VOICE_WAV...',
-        color: 'text-rose-300 bg-rose-950/70 border-rose-500/50 shadow-[0_0_12px_rgba(244,63,94,0.4)] animate-pulse',
+        label: 'Listening to your voice...',
+        color: 'text-[#f87171] bg-[#2c1d1d] border-[#4d2828]',
         dot: 'bg-rose-500 animate-ping',
       };
     }
     if (sessionState === 'processing') {
       return {
-        label: 'SYNAPSE_PROCESSING_WAV...',
-        color: 'text-amber-300 bg-amber-950/60 border-amber-500/40 shadow-[0_0_10px_rgba(245,158,11,0.3)]',
+        label: 'Processing command...',
+        color: 'text-[#fbbf24] bg-[#2a241b] border-[#40341e]',
         dot: 'bg-amber-400 animate-spin',
       };
     }
     if (sessionState === 'speaking') {
       return {
-        label: 'AI_TRANSMITTING (BARGE-IN READY)',
-        color: 'text-purple-300 bg-purple-950/60 border-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)]',
+        label: 'Speaking (Click interrupt to halt)',
+        color: 'text-[#a78bfa] bg-[#241f2e] border-[#3a304a]',
         dot: 'bg-purple-400 animate-pulse',
       };
     }
     return {
-      label: 'VOICE_READY',
-      color: 'text-cyan-400 bg-cyan-950/40 border-cyan-500/30',
-      dot: 'bg-cyan-400',
+      label: 'Voice Ready',
+      color: 'text-[#8f8e8a] bg-[#262626] border-[#333333]',
+      dot: 'bg-[#666666]',
     };
   };
 
   const badge = getStatusBadge();
 
-  // Compute 8 visualizer bar heights based on live volume
+  // Compute 8 visualizer bar heights
   const barHeights = Array.from({ length: 8 }).map((_, i) => {
     if (!realtimeEnabled || sessionState === 'muted') return 3;
     const factor = Math.sin((i + 1) * 0.8) * 0.5 + 0.5;
-    const h = Math.max(3, Math.min(24, Math.round(volume * 120 * factor + 3)));
+    const h = Math.max(3, Math.min(20, Math.round(volume * 100 * factor + 3)));
     return h;
   });
 
   return (
-    <div className="px-3 py-1.5 border-b border-cyan-500/20 bg-cyan-950/30 text-cyan-200 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">
-      {/* Status & Wake Word Indication */}
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <div className={`px-2 py-0.5 rounded-xs border flex items-center gap-1.5 ${badge.color} shrink-0`}>
+    <div className="px-3.5 py-1.5 border-b border-[#2e2e2e] bg-[#242424] text-[#e3e2de] flex flex-wrap items-center justify-between gap-2 text-xs">
+      {/* Status Badge */}
+      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+        <div className={`px-2 py-0.5 rounded-md border flex items-center gap-1.5 ${badge.color} shrink-0 text-xs font-medium`}>
           <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
-          <span className="font-bold tracking-wider truncate text-[10px] sm:text-[11px]">
-            {badge.label}
-          </span>
+          <span className="truncate">{badge.label}</span>
         </div>
 
-        {/* Live Audio Visualizer Bars */}
+        {/* Minimal Audio Level Bars */}
         {realtimeEnabled && (
-          <div className="hidden sm:flex items-center gap-0.5 h-4 px-1.5 bg-slate-950/70 border border-cyan-500/30 rounded-xs shrink-0">
+          <div className="hidden sm:flex items-center gap-0.5 h-4 px-1.5 bg-[#1e1e1e] border border-[#2e2e2e] rounded-sm shrink-0">
             {barHeights.map((h, idx) => (
               <div
                 key={idx}
                 style={{ height: `${h}px` }}
                 className={`w-1 rounded-full transition-all duration-75 ${
                   sessionState === 'recording'
-                    ? 'bg-rose-400 shadow-[0_0_4px_#f43f5e]'
+                    ? 'bg-rose-400'
                     : sessionState === 'speaking'
-                    ? 'bg-purple-400 shadow-[0_0_4px_#c084fc]'
-                    : 'bg-cyan-400 shadow-[0_0_4px_#22d3ee]'
+                    ? 'bg-purple-400'
+                    : 'bg-[#8f8e8a]'
                 }`}
               />
             ))}
@@ -119,54 +117,52 @@ export function RealtimeStatusBar({
 
         {/* Live Heard Transcript Feed */}
         {lastHeard && (
-          <div className="hidden lg:flex items-center gap-1 px-2 py-0.5 bg-cyan-950/80 border border-cyan-400/40 rounded-xs text-cyan-300 text-[10px] truncate max-w-xs animate-fade-in shadow-[0_0_8px_rgba(0,240,255,0.2)]">
-            <AudioLines className="w-3 h-3 text-cyan-400 shrink-0" />
+          <div className="hidden lg:flex items-center gap-1.5 px-2 py-0.5 bg-[#202020] border border-[#333333] rounded-md text-[#9b9a97] text-xs truncate max-w-sm">
+            <AudioLines className="w-3.5 h-3.5 text-[#787774] shrink-0" />
             <span className="truncate italic">&quot;{lastHeard}&quot;</span>
           </div>
         )}
       </div>
 
-      {/* Action Controls: Interrupt, Mic Toggle, Push To Talk */}
+      {/* Action Controls */}
       <div className="flex items-center gap-1.5 ml-auto shrink-0">
         {/* Instant Interruption Button */}
         {sessionState === 'speaking' && (
           <button
             onClick={handleInterrupt}
-            className="px-2 py-0.5 rounded-xs bg-rose-500 hover:bg-rose-400 text-slate-950 font-bold text-[10px] flex items-center gap-1 shadow-[0_0_10px_rgba(244,63,94,0.6)] animate-pulse transition-all cursor-pointer"
-            title="Interrupt and halt AI speech immediately"
+            className="px-2.5 py-1 rounded-md bg-[#381f1f] hover:bg-[#472525] text-[#f87171] border border-[#5c2a2a] text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer"
+            title="Halt AI speech"
           >
-            <Square className="w-2.5 h-2.5 fill-current" />
-            <span>INTERRUPT</span>
+            <Square className="w-3 h-3 fill-current" />
+            <span>Stop Speech</span>
           </button>
         )}
 
         {/* Push to talk / Trigger session */}
         <button
           onClick={manualPushToTalk}
-          className={`px-2 py-0.5 rounded-xs border text-[10px] font-bold flex items-center gap-1 transition-all ${
+          className={`px-2.5 py-1 rounded-md border text-xs font-medium flex items-center gap-1.5 transition-colors ${
             sessionState === 'recording'
-              ? 'bg-rose-500/20 text-rose-200 border-rose-400 shadow-[0_0_8px_rgba(244,63,94,0.4)]'
-              : 'bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-300 border-cyan-500/40'
+              ? 'bg-[#3b1d1d] text-[#f87171] border-[#5c2a2a]'
+              : 'bg-[#2a2a2a] hover:bg-[#333333] text-[#ecebed] border-[#383838]'
           }`}
-          title="Manual Trigger / Record Voice"
+          title="Record or speak command"
         >
-          <Radio className="w-3 h-3 text-cyan-400" />
-          <span className="hidden md:inline">
-            {sessionState === 'recording' ? 'STOP_REC' : 'TRIGGER_VOICE'}
-          </span>
+          <Radio className="w-3 h-3 text-[#9b9a97]" />
+          <span>{sessionState === 'recording' ? 'Stop' : 'Speak'}</span>
         </button>
 
         {/* Mute/Unmute Realtime Voice Listener */}
         <button
           onClick={toggleRealtime}
-          className={`p-1 rounded-xs border text-[10px] transition-all ${
+          className={`p-1.5 rounded-md border text-xs transition-colors ${
             realtimeEnabled
-              ? 'bg-cyan-500/20 text-cyan-200 border-cyan-400 shadow-[0_0_6px_rgba(0,240,255,0.3)]'
-              : 'bg-zinc-900 text-zinc-500 border-zinc-700 hover:text-zinc-300'
+              ? 'bg-[#2a2a2a] text-[#ecebed] border-[#383838]'
+              : 'bg-[#202020] text-[#666666] border-[#2e2e2e] hover:text-[#999999]'
           }`}
-          title={realtimeEnabled ? 'Mute Background Voice Listening' : 'Enable Silent Background Listening'}
+          title={realtimeEnabled ? 'Mute Mic' : 'Enable Mic'}
         >
-          {realtimeEnabled ? <Mic className="w-3 h-3 text-cyan-300" /> : <MicOff className="w-3 h-3" />}
+          {realtimeEnabled ? <Mic className="w-3.5 h-3.5 text-emerald-400" /> : <MicOff className="w-3.5 h-3.5" />}
         </button>
       </div>
     </div>

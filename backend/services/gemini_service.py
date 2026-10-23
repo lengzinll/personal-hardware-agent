@@ -153,7 +153,8 @@ Instructions:
 2. When asked to turn on/off/toggle a specific light without duration, call control_led.
 3. When asked to control all lights at once, call control_led(color='all', state=...).
 4. When asked about light or lamp status, call get_led_status.
-5. Be concise, direct, and conversational."""
+5. Be concise, direct, and conversational.
+6. LANGUAGE DIRECTIVE: If the user speaks or commands in Khmer (ភាសាខ្មែរ) or if the input contains Khmer characters, you MUST reply in natural, polite Khmer (ភាសាខ្មែរ) so the Khmer neural text-to-speech engine speaks back in Khmer. If addressed in English, reply in English."""
 
 def _execute_function_calls(function_calls: List[Any]) -> tuple[str, Any, List[types.Part]]:
     executed_action = "chat_response"

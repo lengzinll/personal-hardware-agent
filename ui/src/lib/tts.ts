@@ -1,6 +1,5 @@
 /**
- * Browser-native Web Speech API Text-to-Speech (speechSynthesis)
- * Uses high-quality UK English (en-GB) voices and natural unit expansion.
+ * Audio speech synthesis using the browser's native Web Speech API (window.speechSynthesis)
  */
 
 let activeUtterance: SpeechSynthesisUtterance | null = null;
@@ -15,7 +14,7 @@ export function stopTTS(): void {
 }
 
 /**
- * Finds the highest-quality native UK English voice available on the device
+ * Finds the highest-quality native UK or US English voice available in the browser
  */
 export function getBestUkVoice(): SpeechSynthesisVoice | null {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
@@ -30,7 +29,7 @@ export function getBestUkVoice(): SpeechSynthesisVoice | null {
       v.lang.toLowerCase() === 'en_gb'
   );
 
-  // Prioritize premium/natural British voices (Google, Microsoft, Apple, Daniel, Serena, etc.)
+  // Prioritize natural/neural British voices
   const premiumUkVoice = ukVoices.find((v) =>
     /(natural|neural|google|daniel|serena|oliver|arthur|sonia|ryan|hazel|george|susan|libby)/i.test(
       v.name
@@ -41,7 +40,7 @@ export function getBestUkVoice(): SpeechSynthesisVoice | null {
   if (ukVoices.length > 0) return ukVoices[0];
 
   // Fallback to any English voice
-  return voices.find((v) => v.lang.toLowerCase().startsWith('en')) || null;
+  return voices.find((v) => v.lang.toLowerCase().startsWith('en')) || voices[0] || null;
 }
 
 /**
@@ -101,7 +100,7 @@ export function cleanTextForSpeech(text: string): string {
 }
 
 /**
- * Plays speech directly in the browser using window.speechSynthesis with native UK voice
+ * Speaks text directly using the browser's native Web Speech API (window.speechSynthesis)
  */
 export async function playBackendTTS(
   text: string,
@@ -121,20 +120,19 @@ export async function playBackendTTS(
     return;
   }
 
-  // Halt any current speech
+  // Cancel any ongoing speech
   stopTTS();
 
   try {
     const utterance = new SpeechSynthesisUtterance(cleanText);
     activeUtterance = utterance;
 
-    // Set UK English
+    // Use browser native voice configuration
     utterance.lang = 'en-GB';
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
     utterance.volume = 1.0;
 
-    // Assign the best available native British voice
     const bestVoice = getBestUkVoice();
     if (bestVoice) {
       utterance.voice = bestVoice;
@@ -153,10 +151,7 @@ export async function playBackendTTS(
       if (onStart) onStart();
     };
 
-    utterance.onend = () => {
-      safeEnd();
-    };
-
+    utterance.onend = safeEnd;
     utterance.onerror = (e) => {
       console.warn('[Browser SpeechSynthesis Error]:', e);
       if (onError) onError(e);

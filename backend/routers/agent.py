@@ -34,7 +34,60 @@ class AgentCommandRequest(BaseModel):
 def parse_local_led_command(text: str) -> Optional[Dict[str, Any]]:
     lower = text.strip().lower()
 
-    # Helper to extract duration from text
+    # === Khmer Language Hardware Commands (Ultra-Fast Native Routing) ===
+    # 1. Lamp Status (Khmer)
+    if any(k in lower for k in ["ស្ថានភាពអំពូល", "ពិនិត្យអំពូល", "តើអំពូលបើក", "អំពូលបើកឬ", "ស្ថានភាពភ្លើង"]):
+        res = get_led_status()
+        res["speechText"] = "ស្ថានភាពភ្លើងនិងអំពូលបច្ចុប្បន្ន"
+        res["message"] = f'**ស្ថានភាព**: "{res.get("speechText")}"'
+        return {"action": "lamp_status_checked", "result": res}
+
+    # 2. Turn OFF Lamp / Light (Khmer)
+    if any(k in lower for k in ["បិទអំពូល", "ពន្លត់អំពូល", "បិទភ្លើងអំពូល", "បិទអំពូលភ្លើង", "បិទភ្លើង", "ពន្លត់ភ្លើង"]):
+        res = control_lamp("OFF", force=True, source="agent")
+        res["speechText"] = "អំពូលត្រូវបានបិទរួចរាល់"
+        res["message"] = '**អំពូល**: "អំពូលត្រូវបានបិទរួចរាល់"'
+        return {"action": "lamp_off", "result": res}
+
+    # 3. Turn ON Lamp / Light (Khmer)
+    if any(k in lower for k in ["បើកអំពូល", "បំភ្លឺអំពូល", "បើកភ្លើងអំពូល", "បើកអំពូលភ្លើង", "បើកភ្លើង", "បំភ្លឺភ្លើង"]):
+        res = control_lamp("ON", force=True, source="agent")
+        res["speechText"] = "អំពូលត្រូវបានបើករួចរាល់"
+        res["message"] = '**អំពូល**: "អំពូលត្រូវបានបើករួចរាល់"'
+        return {"action": "lamp_on", "result": res}
+
+    # 4. Turn OFF ALL Lights (Khmer)
+    if any(k in lower for k in ["បិទទាំងអស់", "ពន្លត់ទាំងអស់", "បិទភ្លើងទាំងអស់", "ពន្លត់ភ្លើងទាំងអស់"]):
+        res = control_leds(color="all", action="OFF", include_lamp=True)
+        res["speechText"] = "ភ្លើងទាំងអស់ត្រូវបានបិទរួចរាល់"
+        res["message"] = '**ភ្លើងទាំងអស់**: "ភ្លើងទាំងអស់ត្រូវបានបិទរួចរាល់"'
+        return {"action": "led_all_off", "result": res}
+
+    # 5. Turn ON ALL Lights (Khmer)
+    if any(k in lower for k in ["បើកទាំងអស់", "បើកភ្លើងទាំងអស់"]):
+        res = control_leds(color="all", action="ON", include_lamp=True)
+        res["speechText"] = "ភ្លើងទាំងអស់ត្រូវបានបើករួចរាល់"
+        res["message"] = '**ភ្លើងទាំងអស់**: "ភ្លើងទាំងអស់ត្រូវបានបើករួចរាល់"'
+        return {"action": "led_all_on", "result": res}
+
+    # 6. Traffic Presets (Khmer)
+    if any(k in lower for k in ["ភ្លើងក្រហម", "ពណ៌ក្រហម", "ក្រហម"]):
+        res = set_traffic_preset("red")
+        res["speechText"] = "ភ្លើងសញ្ញាក្រហមត្រូវបានបើក"
+        res["message"] = '**ភ្លើងសញ្ញា**: "ភ្លើងសញ្ញាក្រហមត្រូវបានបើក"'
+        return {"action": "traffic_preset_red", "result": res}
+    if any(k in lower for k in ["ភ្លើងលឿង", "ពណ៌លឿង", "លឿង"]):
+        res = set_traffic_preset("yellow")
+        res["speechText"] = "ភ្លើងសញ្ញាលឿងត្រូវបានបើក"
+        res["message"] = '**ភ្លើងសញ្ញា**: "ភ្លើងសញ្ញាលឿងត្រូវបានបើក"'
+        return {"action": "traffic_preset_yellow", "result": res}
+    if any(k in lower for k in ["ភ្លើងបៃតង", "ភ្លើងខៀវ", "ពណ៌បៃតង", "បៃតង", "ពណ៌ខៀវ"]):
+        res = set_traffic_preset("green")
+        res["speechText"] = "ភ្លើងសញ្ញាបៃតងត្រូវបានបើក"
+        res["message"] = '**ភ្លើងសញ្ញា**: "ភ្លើងសញ្ញាបៃតងត្រូវបានបើក"'
+        return {"action": "traffic_preset_green", "result": res}
+
+    # Helper to extract duration from text (English)
     def extract_duration(text: str) -> Optional[int]:
         match = re.search(r'\b(?:for|in)\s+([0-9.]+)\s*([a-z]+)?\b', text)
         if match:
@@ -114,7 +167,7 @@ def parse_local_led_command(text: str) -> Optional[Dict[str, Any]]:
     # 5. Specific Color Controls (Red, Yellow, Green)
     for color in ["red", "yellow", "green"]:
         if color in lower:
-            if re.search(rf"(turn|switch|power)\s+on(\s+the)?\s+({color}|light|led)|{color}\\s+on", lower):
+            if re.search(rf"(turn|switch|power)\s+on(\s+the)?\s+({color}|light|led)|{color}\s+on", lower):
                 if duration_seconds and duration_seconds > 0:
                     res = control_leds_timed(color=color, action="ON", duration_seconds=duration_seconds)
                     return {"action": f"led_{color}_on_timed", "result": res}
@@ -134,7 +187,6 @@ def parse_local_led_command(text: str) -> Optional[Dict[str, Any]]:
         return {"action": "led_all_off", "result": res}
 
     if re.search(r"\b(turn\s+on\s+(the\s+)?(light|lights|led)|turn\s+(the\s+)?(light|lights|led)\s+on|light\s+on|lights\s+on)\b", lower):
-        # If lamp is off, turn lamp ON; otherwise turn all lights ON
         if get_lamp_state() == "OFF":
             res = control_lamp("ON", force=True, source="agent")
             return {"action": "lamp_on", "result": res}
@@ -169,7 +221,6 @@ async def stream_agent_command(req: AgentCommandRequest) -> AsyncGenerator[Dict[
             "toolPayload": res_data,
             "model": "Local Hardware Engine (Verified)"
         }
-        # Stream response smoothly
         words = msg.split(" ")
         for i, w in enumerate(words):
             piece = w if i == 0 else " " + w
@@ -277,7 +328,7 @@ async def handle_agent_command(req: AgentCommandRequest):
     return {
         "success": True,
         "command": input_text,
-        "response": f'Received: "{input_text}". You can control lights with: "Turn on Red", "Turn off Yellow", "Turn on Green", "Turn off the lamp", "All off", or "Traffic Red".',
+        "response": f'Received: "{input_text}". You can control lights with: "Turn on Red", "Turn off Yellow", "Turn on Green", "Turn off the lamp", "All off", or "Traffic Red" / "បិទអំពូល", "បើកអំពូល", "ភ្លើងក្រហម", "ភ្លើងបៃតង".',
         "actionTaken": "general_command_processed",
         "payload": None,
         "model": "Local LED Hardware Engine",

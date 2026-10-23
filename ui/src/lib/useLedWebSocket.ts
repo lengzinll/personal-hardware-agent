@@ -1,7 +1,6 @@
 "use client"
 
-import { useCallback } from 'react';
-import { useEffect, useState, useRef } from 'react';
+import { createContext, useContext, useCallback, useEffect, useState, useRef } from 'react';
 
 export interface LedStates {
   red: 'ON' | 'OFF';
@@ -79,7 +78,7 @@ interface PendingAgentRequest {
   accumulated: string;
 }
 
-interface UseLedWebSocketReturn {
+export interface UseLedWebSocketReturn {
   ledStates: LedStates;
   hardwareInfo: HardwareInfo | null;
   lastCommandResult: HardwareExecutionResult | null;
@@ -90,10 +89,24 @@ interface UseLedWebSocketReturn {
   sendAgentCommand: (options: AgentCommandOptions) => Promise<AgentCommandResult>;
 }
 
+export const LedWebSocketContext = createContext<UseLedWebSocketReturn | null>(null);
+
 /**
- * Custom hook for real-time LED & Lamp state synchronization and streaming AI agent commands over WebSocket.
+ * Access the shared LED & Agent WebSocket connection.
+ * When used inside LedWebSocketProvider, shares a single connection across all components.
  */
 export function useLedWebSocket(): UseLedWebSocketReturn {
+  const context = useContext(LedWebSocketContext);
+  if (context) {
+    return context;
+  }
+  return useLedWebSocketInternal();
+}
+
+/**
+ * Internal hook that manages the actual WebSocket connection lifecycle.
+ */
+export function useLedWebSocketInternal(): UseLedWebSocketReturn {
   const [ledStates, setLedStates] = useState<LedStates>({
     red: 'OFF',
     yellow: 'OFF',
@@ -115,8 +128,12 @@ export function useLedWebSocket(): UseLedWebSocketReturn {
       const res = await fetch('/api/led');
       if (res.ok) {
         const data = await res.json();
-        if (data.states) setLedStates(data.states);
-        if (data.hardware_info) setHardwareInfo(data.hardware_info);
+        if (data.states) {
+          setLedStates(data.states);
+        }
+        if (data.hardware) {
+          setHardwareInfo(data.hardware);
+        }
       }
     } catch {}
   }, []);
@@ -127,9 +144,18 @@ export function useLedWebSocket(): UseLedWebSocketReturn {
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
       let wsHost = window.location.host;
-      if (window.location.port === '3000') {
-        wsHost = `${window.location.hostname}:8000`;
+
+      // In development when Next.js is running on port 3000 (or non-8000), target backend on 8000
+      if (window.location.port && window.location.port !== '8000') {
+        const hostName = window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
+        wsHost = `${hostName}:8000`;
       }
+
+      // Normalize localhost to 127.0.0.1 to prevent IPv6 [::1] connection refused in Chromium
+      if (wsHost.startsWith('localhost:')) {
+        wsHost = wsHost.replace('localhost:', '127.0.0.1:');
+      }
+
       const url = process.env.NEXT_PUBLIC_WS_URL || `${protocol}://${wsHost}/ws/led`;
 
       const ws = new WebSocket(url);

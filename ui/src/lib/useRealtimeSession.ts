@@ -36,6 +36,8 @@ export function useRealtimeSession({
   messages,
 }: UseRealtimeSessionProps) {
   const [realtimeEnabled, setRealtimeEnabled] = useAtom(realtimeEnabledAtom);
+  const realtimeEnabledRef = useRef<boolean>(realtimeEnabled);
+  realtimeEnabledRef.current = realtimeEnabled;
   const [sessionState, setSessionState] = useAtom(realtimeSessionStateAtom);
   const [, setVolume] = useAtom(realtimeVolumeAtom);
   const wakeWord = useAtomValue(wakeWordAtom);
@@ -49,7 +51,7 @@ export function useRealtimeSession({
   const recognitionRef = useRef<any>(null);
   const isRecognitionRunningRef = useRef<boolean>(false);
   const speechRecognitionFailedRef = useRef<boolean>(false);
-  const isTtsPlayingRef = useRef<boolean>(false);
+  const isTtsRef = useRef<boolean>(false);
   const speakingIdRef = useRef<string | null>(speakingId);
   speakingIdRef.current = speakingId;
   const prevSpeakingIdRef = useRef<string | null>(null);
@@ -65,6 +67,7 @@ export function useRealtimeSession({
 
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastSpeechTimestampRef = useRef<number>(0);
+  const resetSilenceTimerRef = useRef<(delayMs?: number) => void>(() => {});
   const latestLiveTranscriptRef = useRef<string>('');
   const isStartedRef = useRef<boolean>(false);
   const isProcessingRef = useRef<boolean>(false);
@@ -94,13 +97,40 @@ export function useRealtimeSession({
     isRecognitionRunningRef.current = false;
   }, []);
 
-  // Start speech recognition instance safely
+  // Reset silence timer: Auto-sends after silence threshold (default 1.0s, push-to-talk 3.0s)
+  const resetSilenceTimer = useCallback((delayMs: number = 1000) => {
+    const liveState = sessionStateRef.current as RealtimeSessionState;
+    if (
+      !realtimeEnabledRef.current ||
+      liveState === 'muted' ||
+      isTtsRef.current ||
+      speakingIdRef.current ||
+      isProcessingRef.current ||
+      liveState === 'speaking'
+    ) return;
+    lastSpeechTimestampRef.current = Date.now();
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+    }
+
+    silenceTimerRef.current = setTimeout(() => {
+      const elapsedMs = Date.now() - lastSpeechTimestampRef.current;
+      console.log(
+        `%c[⏱️ ${delayMs}ms SILENCE ELAPSED (${elapsedMs}ms) ➔ AUTO-SENDING NOW]`,
+        'color: #38ef7d; font-weight: bold; background: #064e3b; padding: 4px 10px; border-radius: 4px; font-size: 13px;'
+      );
+      handleFinalizeRecording();
+    }, delayMs);
+  }, []);
+  resetSilenceTimerRef.current = resetSilenceTimer;
+
+  // Start speech recognition instance safely (Browser Native Web Speech API - English)
   const startSpeechRecognition = useCallback(() => {
     if (typeof window === 'undefined') return;
     const currentState = sessionStateRef.current as RealtimeSessionState;
     if (
       isRecognitionRunningRef.current ||
-      isTtsPlayingRef.current ||
+      isTtsRef.current ||
       speakingIdRef.current ||
       currentState === 'speaking' ||
       currentState === 'muted' ||
@@ -127,14 +157,14 @@ export function useRealtimeSession({
 
       recognition.onstart = () => {
         isRecognitionRunningRef.current = true;
-        console.log('[SpeechRecognition] Online & Listening for user voice...');
+        console.log('[SpeechRecognition] Online & Listening for user voice (en-US)...');
       };
 
       recognition.onresult = (event: any) => {
         const liveState = sessionStateRef.current as RealtimeSessionState;
         // Strict Echo Guard: If AI is speaking via TTS or processing, ignore completely
         if (
-          isTtsPlayingRef.current ||
+          isTtsRef.current ||
           liveState === 'speaking' ||
           speakingIdRef.current ||
           isProcessingRef.current
@@ -156,7 +186,7 @@ export function useRealtimeSession({
         if (liveText) {
           const currentLiveState = sessionStateRef.current as RealtimeSessionState;
           if (
-            isTtsPlayingRef.current ||
+            isTtsRef.current ||
             currentLiveState === 'speaking' ||
             speakingIdRef.current ||
             isProcessingRef.current
@@ -171,7 +201,7 @@ export function useRealtimeSession({
           }
 
           console.log(
-            '%c[🎙️ USER SPEECH]:',
+            '%c[🎤 USER SPEECH (en-US)]:',
             'color: #00f0ff; font-weight: bold; background: #082f49; padding: 2px 6px; border-radius: 3px;',
             liveText
           );
@@ -181,7 +211,9 @@ export function useRealtimeSession({
           }
 
           // Start 1.0s countdown from the moment this word was spoken
-          resetSilenceTimer();
+          if (resetSilenceTimerRef.current) {
+            resetSilenceTimerRef.current(1000);
+          }
         }
       };
 
@@ -193,7 +225,7 @@ export function useRealtimeSession({
         if (e.error === 'network' || e.error === 'service-not-allowed') {
           if (!speechRecognitionFailedRef.current) {
             speechRecognitionFailedRef.current = true;
-            console.warn('[SpeechRecognition] Browser network recognition unavailable in this origin. Audio VAD fallback active.');
+            console.warn('[SpeechRecognition] Browser network recognition unavailable in this origin.');
           }
           return;
         }
@@ -206,7 +238,7 @@ export function useRealtimeSession({
         if (
           realtimeEnabled &&
           !speechRecognitionFailedRef.current &&
-          !isTtsPlayingRef.current &&
+          !isTtsRef.current &&
           !speakingIdRef.current &&
           liveState !== 'muted' &&
           liveState !== 'speaking' &&
@@ -216,7 +248,7 @@ export function useRealtimeSession({
             const endState = sessionStateRef.current as RealtimeSessionState;
             if (
               !isRecognitionRunningRef.current &&
-              !isTtsPlayingRef.current &&
+              !isTtsRef.current &&
               !speakingIdRef.current &&
               endState !== 'speaking' &&
               !isProcessingRef.current
@@ -242,7 +274,7 @@ export function useRealtimeSession({
 
     if (speakingId) {
       // AI started speaking -> completely pause microphone and speech recognition
-      isTtsPlayingRef.current = true;
+      isTtsRef.current = true;
       if (silenceTimerRef.current) {
         clearTimeout(silenceTimerRef.current);
         silenceTimerRef.current = null;
@@ -269,7 +301,7 @@ export function useRealtimeSession({
       }
 
       const cooldownTimer = setTimeout(() => {
-        isTtsPlayingRef.current = false;
+        isTtsRef.current = false;
         const stateAfterCooldown = sessionStateRef.current as RealtimeSessionState;
         if (
           realtimeEnabled &&
@@ -300,8 +332,14 @@ export function useRealtimeSession({
     transcriptText: string
   ) => {
     if (isProcessingRef.current) return;
+
     const cleanCommand = transcriptText.trim();
-    if (!cleanCommand && !wavBlob) return;
+
+    if (!cleanCommand && !wavBlob) {
+      isProcessingRef.current = false;
+      setSessionState('standby');
+      return;
+    }
 
     isProcessingRef.current = true;
     setSessionState('processing');
@@ -324,7 +362,7 @@ export function useRealtimeSession({
     );
 
     // Show user message in chat feed immediately
-    const userMsgText = cleanCommand || '🎙️ [Voice Audio Transmission]';
+    const userMsgText = cleanCommand || '🎤 [Voice Audio Transmission]';
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       sender: 'user',
@@ -332,6 +370,8 @@ export function useRealtimeSession({
       timestamp: nowTime,
     };
     if (onNewMessageRef.current) onNewMessageRef.current(userMsg);
+    // Clear input box now that message has been placed in chat
+    if (onTranscriptChangeRef.current) onTranscriptChangeRef.current('');
 
     const historyPayload = messagesRef.current
       .filter((m) => m.id !== 'welcome' && m.id !== 'welcome_reset' && m.text && m.text.trim())
@@ -342,7 +382,7 @@ export function useRealtimeSession({
       }));
 
     const agentMsgId = (Date.now() + 1).toString();
-    const modelDisplayName = engineMode === 'ollama' ? `OLLAMA:${selectedOllamaModel || 'local'}` : 'GEMINI_CLOUD';
+    const modelDisplayName = engineMode === 'ollama' ? `Ollama (${selectedOllamaModel || 'local'})` : 'Gemini Flash';
 
     try {
       let data: any;
@@ -356,6 +396,11 @@ export function useRealtimeSession({
             ollamaModel: selectedOllamaModel,
             history: historyPayload,
             onStreamStart: () => {
+              isProcessingRef.current = true;
+              if (recorderRef.current) recorderRef.current.pauseListening();
+              if (sessionStateRef.current !== 'speaking') {
+                setSessionState('speaking');
+              }
               if (onNewMessageRef.current) {
                 onNewMessageRef.current({
                   id: agentMsgId,
@@ -408,18 +453,34 @@ export function useRealtimeSession({
           data = await res.json();
         }
       } else if (wavBlob) {
-        // Form-data upload for raw WAV audio if SpeechRecognition produced no text
+        // Fallback form-data upload for raw WAV audio if SpeechRecognition produced no text
         const formData = new FormData();
         formData.append('file', wavBlob, 'recording.wav');
         formData.append('engineMode', engineMode);
         formData.append('ollamaModel', selectedOllamaModel || '');
         formData.append('history', JSON.stringify(historyPayload));
+        if (cleanCommand) {
+          formData.append('transcript', cleanCommand);
+        }
 
         const res = await fetch('/api/realtime/audio', {
           method: 'POST',
           body: formData,
         });
         data = await res.json();
+
+        if (data.transcript) {
+          if (onNewMessageRef.current) {
+            onNewMessageRef.current({
+              ...userMsg,
+              text: data.transcript,
+            });
+          }
+          setLastHeard(data.transcript);
+          if (onTranscriptChangeRef.current) {
+            onTranscriptChangeRef.current(data.transcript);
+          }
+        }
       } else {
         setSessionState('standby');
         isProcessingRef.current = false;
@@ -452,28 +513,51 @@ export function useRealtimeSession({
         if (onNewMessageRef.current) onNewMessageRef.current(agentMsg);
 
         if (data.actionTaken) {
-          toast.success('⚡ HARDWARE_COMMITTED', { description: replyText });
+          toast.success('Action executed', { description: replyText });
           if (onRefreshDataRef.current) onRefreshDataRef.current();
         }
 
         // Trigger TTS playback ONLY AFTER streaming is fully finished
         if (ttsEnabled && replyText) {
+          isTtsRef.current = true;
+          isProcessingRef.current = true;
+          setSessionState('speaking');
+          if (recorderRef.current) recorderRef.current.pauseListening();
           setSpeakingId(agentMsgId);
+
           playBackendTTS(
             replyText,
             'en-US-JennyNeural',
-            undefined,
             () => {
-              setSpeakingId(null);
+              isTtsRef.current = true;
+              setSessionState('speaking');
+              if (recorderRef.current) recorderRef.current.pauseListening();
             },
             () => {
               setSpeakingId(null);
+              // Cooldown buffer (500ms) after TTS ends to ensure audio room reflections don't trigger mic
+              setTimeout(() => {
+                isTtsRef.current = false;
+                isProcessingRef.current = false;
+                setSessionState('standby');
+                if (recorderRef.current) recorderRef.current.resumeListening();
+                startSpeechRecognition();
+              }, 500);
+            },
+            () => {
+              setSpeakingId(null);
+              isTtsRef.current = false;
+              isProcessingRef.current = false;
+              setSessionState('standby');
+              if (recorderRef.current) recorderRef.current.resumeListening();
             }
           );
         } else {
           setSessionState('standby');
           latestLiveTranscriptRef.current = '';
-          if (onTranscriptChangeRef.current) onTranscriptChangeRef.current('');
+          if (onTranscriptChangeRef.current) {
+            onTranscriptChangeRef.current('');
+          }
           if (recorderRef.current) recorderRef.current.resumeListening();
           startSpeechRecognition();
         }
@@ -482,45 +566,63 @@ export function useRealtimeSession({
         const errorAgentMsg: ChatMessage = {
           id: agentMsgId,
           sender: 'agent',
-          text: `⚠️ **EXECUTION_ERROR**: ${errMsg}`,
+          text: `⚠️ **Execution Error**: ${errMsg}`,
           isStreaming: false,
           modelUsed: modelDisplayName,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         };
         if (onNewMessageRef.current) onNewMessageRef.current(errorAgentMsg);
         setSessionState('standby');
-        if (onTranscriptChangeRef.current) onTranscriptChangeRef.current('');
+        if (onTranscriptChangeRef.current) {
+          onTranscriptChangeRef.current('');
+        }
         if (recorderRef.current) recorderRef.current.resumeListening();
         startSpeechRecognition();
       }
     } catch (err: any) {
       console.error('[Voice Command Transmission Error]:', err);
       setSessionState('standby');
-      if (onTranscriptChangeRef.current) onTranscriptChangeRef.current('');
+      if (onTranscriptChangeRef.current) {
+        onTranscriptChangeRef.current('');
+      }
       if (recorderRef.current) recorderRef.current.resumeListening();
       startSpeechRecognition();
     } finally {
-      isProcessingRef.current = false;
+      if (!isTtsRef.current && !speakingIdRef.current) {
+        isProcessingRef.current = false;
+      }
       latestLiveTranscriptRef.current = '';
     }
   }, [engineMode, selectedOllamaModel, ttsEnabled, setSessionState, setSpeakingId, stopSpeechRecognition, startSpeechRecognition]);
 
-  // Handle finalize after 1.0s of continuous silence (Sentence Completed -> Auto Send)
+  // Handle finalize after silence threshold (Sentence Completed -> Auto Send)
   const handleFinalizeRecording = useCallback(() => {
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
     }
 
+    // HARD MUTE GUARD: If mic icon was toggled off or state is muted, drop recording completely
+    if (!realtimeEnabledRef.current || sessionStateRef.current === 'muted') {
+      console.log('[Realtime] Mic is inactive / muted — discarding recording.');
+      if (recorderRef.current) {
+        recorderRef.current.stopRecording();
+      }
+      latestLiveTranscriptRef.current = '';
+      return;
+    }
+
     let wavBlob: Blob | null = null;
     if (recorderRef.current) {
-      const audioResult = recorderRef.current.stopRecording();
-      wavBlob = audioResult.blob;
+      const audioRes = recorderRef.current.stopRecording();
+      wavBlob = audioRes?.blob || null;
     }
 
     const rawSentence = latestLiveTranscriptRef.current.trim();
     latestLiveTranscriptRef.current = '';
-    if (onTranscriptChangeRef.current) onTranscriptChangeRef.current('');
+    if (onTranscriptChangeRef.current) {
+      onTranscriptChangeRef.current('');
+    }
 
     if (!rawSentence && !wavBlob) {
       const liveState = sessionStateRef.current as RealtimeSessionState;
@@ -537,38 +639,21 @@ export function useRealtimeSession({
     transmitAudioToBackend(wavBlob, cleanCommand);
   }, [transmitAudioToBackend, stripWakeWord, setSessionState]);
 
-  // Reset silence timer: Wait 1000ms (1.0s) after user stops talking, then auto-send
-  const resetSilenceTimer = useCallback(() => {
-    const liveState = sessionStateRef.current as RealtimeSessionState;
-    if (isTtsPlayingRef.current || speakingIdRef.current || isProcessingRef.current || liveState === 'speaking') return;
-    lastSpeechTimestampRef.current = Date.now();
-    if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current);
-    }
-
-    silenceTimerRef.current = setTimeout(() => {
-      const elapsedMs = Date.now() - lastSpeechTimestampRef.current;
-      console.log(
-        `%c[⏱️ 1.0s SILENCE ELAPSED (${elapsedMs}ms) ➔ AUTO-SENDING NOW]`,
-        'color: #38ef7d; font-weight: bold; background: #064e3b; padding: 4px 10px; border-radius: 4px; font-size: 13px;'
-      );
-      handleFinalizeRecording();
-    }, 1000);
-  }, [handleFinalizeRecording]);
-
   // Interrupt active speech
   const handleInterrupt = useCallback(() => {
     stopTTS();
     setSpeakingId(null);
-    isTtsPlayingRef.current = false;
+    isTtsRef.current = false;
     if (recorderRef.current) {
       recorderRef.current.resumeListening();
     }
     setSessionState('standby');
     latestLiveTranscriptRef.current = '';
-    if (onTranscriptChangeRef.current) onTranscriptChangeRef.current('');
+    if (onTranscriptChangeRef.current) {
+      onTranscriptChangeRef.current('');
+    }
     startSpeechRecognition();
-    toast.info('INTERRUPT_TRIGGERED', { description: 'Halting AI transmission' });
+    toast.info('Halted AI speech');
   }, [setSpeakingId, setSessionState, startSpeechRecognition]);
 
   // Initialize Audio & Speech Recognition on mount / user trigger
@@ -587,7 +672,7 @@ export function useRealtimeSession({
         : 'Microphone API (navigator.mediaDevices.getUserMedia) is not supported in this browser.';
 
       console.warn('[Audio Init Check]:', desc);
-      toast.error('MICROPHONE_UNAVAILABLE', { description: desc });
+      toast.error('Microphone unavailable', { description: desc });
       setSessionState('muted');
       setRealtimeEnabled(false);
       return;
@@ -602,37 +687,52 @@ export function useRealtimeSession({
 
       // Initialize Web Audio stream for visualizer only
       await recorder.initStream((vol: number, isSpeech: boolean) => {
+        // HARD MUTE GUARD: If mic is toggled off or muted, drop audio processing immediately
+        if (!realtimeEnabledRef.current || sessionStateRef.current === 'muted') {
+          setVolume(0);
+          return;
+        }
+
         setVolume(vol);
 
-        // Fallback VAD recording only if SpeechRecognition is failed/unsupported
+        // Fallback VAD recording only if browser SpeechRecognition is unsupported
         if (speechRecognitionFailedRef.current && isSpeech) {
           const streamState = sessionStateRef.current as RealtimeSessionState;
-          if (
-            !isTtsPlayingRef.current &&
-            !speakingIdRef.current &&
-            streamState !== 'speaking' &&
-            !isProcessingRef.current
-          ) {
+          const blocked = isTtsRef.current || !!speakingIdRef.current || streamState === 'speaking' || streamState === 'processing' || isProcessingRef.current;
+          if (blocked) {
+            if (recorderRef.current && recorderRef.current.getIsRecording()) {
+              recorderRef.current.pauseListening();
+            }
+            return;
+          } else {
             if (streamState !== 'recording') {
               setSessionState('recording');
             }
-            if (recorderRef.current) {
-              recorderRef.current.startRecording();
+            if (!recorderRef.current) {
+              recorderRef.current = recorder;
             }
-            resetSilenceTimer();
+            const activeRecorder = recorderRef.current || recorder;
+            const alreadyRecording = activeRecorder.getIsRecording();
+            if (!alreadyRecording) {
+              activeRecorder.resumeListening();
+              activeRecorder.startRecording();
+            }
+            if (resetSilenceTimerRef.current) {
+              resetSilenceTimerRef.current(1200);
+            }
           }
         }
       });
 
-      // Start Browser SpeechRecognition
+      // Start Browser native SpeechRecognition (en-US)
       startSpeechRecognition();
 
-      toast.success('VOICE_LISTENER_ONLINE', { description: 'Speak anytime — auto-sends 1s after you stop!' });
+      toast.success('Voice listener active', { description: 'Listening in English (en-US)' });
       setSessionState('standby');
     } catch (err: any) {
       console.error('[Audio Init Failed]:', err);
       const isDenied = err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError';
-      toast.error(isDenied ? 'MICROPHONE_DENIED' : 'MICROPHONE_ERROR', {
+      toast.error(isDenied ? 'Microphone permission denied' : 'Microphone error', {
         description: isDenied
           ? 'Microphone permission was denied. Please allow microphone access in browser settings.'
           : (err.message || 'Check microphone permissions and settings'),
@@ -644,7 +744,6 @@ export function useRealtimeSession({
     setRealtimeEnabled,
     setSessionState,
     setVolume,
-    resetSilenceTimer,
     startSpeechRecognition,
   ]);
 
@@ -659,7 +758,7 @@ export function useRealtimeSession({
       const liveState = sessionStateRef.current as RealtimeSessionState;
       if (
         realtimeEnabled &&
-        !isTtsPlayingRef.current &&
+        !isTtsRef.current &&
         !speakingIdRef.current &&
         liveState !== 'muted' &&
         liveState !== 'speaking' &&
@@ -677,6 +776,7 @@ export function useRealtimeSession({
         recorderRef.current.cleanup();
         recorderRef.current = null;
       }
+      isStartedRef.current = false;
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
@@ -690,12 +790,23 @@ export function useRealtimeSession({
     if (realtimeEnabled) {
       stopTTS();
       setSpeakingId(null);
-      isTtsPlayingRef.current = false;
-      if (recorderRef.current) recorderRef.current.cleanup();
+      isTtsRef.current = false;
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+      if (recorderRef.current) {
+        recorderRef.current.stopRecording();
+        recorderRef.current.cleanup();
+        recorderRef.current = null;
+      }
+      isStartedRef.current = false;
       stopSpeechRecognition();
       setSessionState('muted');
       setRealtimeEnabled(false);
-      toast.info('VOICE_MUTED');
+      realtimeEnabledRef.current = false;
+      setVolume(0);
+      toast.info('Microphone muted', { description: 'Voice listening is paused' });
     } else {
       if (!AudioRecorder.isSupported()) {
         const isHttpsOrLocalhost =
@@ -704,7 +815,7 @@ export function useRealtimeSession({
             window.location.hostname === 'localhost' ||
             window.location.hostname === '127.0.0.1');
 
-        toast.error('MICROPHONE_UNAVAILABLE', {
+        toast.error('Microphone unavailable', {
           description: !isHttpsOrLocalhost
             ? 'Microphone requires HTTPS or localhost. Insecure HTTP contexts block audio input.'
             : 'Microphone API is not supported in this browser.',
@@ -717,7 +828,7 @@ export function useRealtimeSession({
     }
   };
 
-  const manualPushToTalk = () => {
+  const manualPushToTalk = async () => {
     if (!realtimeEnabled) {
       if (!AudioRecorder.isSupported()) {
         const isHttpsOrLocalhost =
@@ -726,7 +837,7 @@ export function useRealtimeSession({
             window.location.hostname === 'localhost' ||
             window.location.hostname === '127.0.0.1');
 
-        toast.error('MICROPHONE_UNAVAILABLE', {
+        toast.error('Microphone unavailable', {
           description: !isHttpsOrLocalhost
             ? 'Microphone requires HTTPS or localhost. Insecure HTTP contexts block audio input.'
             : 'Microphone API is not supported in this browser.',
@@ -737,12 +848,30 @@ export function useRealtimeSession({
       isStartedRef.current = false;
       initRealtimeListener();
     } else {
+      // If already recording, clicking STOP_REC immediately finishes and transmits
+      if (sessionStateRef.current === 'recording') {
+        console.log('[Push-to-Talk] User clicked Stop -> Finalizing and sending command...');
+        handleFinalizeRecording();
+        return;
+      }
+
+      // Resume Web Audio AudioContext from user click gesture
+      if (recorderRef.current) {
+        await recorderRef.current.resumeAudioContext();
+      }
+
       setSessionState('recording');
       latestLiveTranscriptRef.current = '';
-      if (onTranscriptChangeRef.current) onTranscriptChangeRef.current('');
+      if (onTranscriptChangeRef.current) {
+        onTranscriptChangeRef.current('');
+      }
       startSpeechRecognition();
-      resetSilenceTimer();
-      toast.info('LISTENING', { description: 'Speak your command...' });
+      if (resetSilenceTimerRef.current) {
+        resetSilenceTimerRef.current(3000);
+      }
+      toast.info('Listening...', {
+        description: 'Speak your English command now'
+      });
     }
   };
 

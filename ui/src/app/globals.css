@@ -4,32 +4,29 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* HUD Cyberpunk / Sci-Fi Custom Scrollbar */
+/* Notion Minimalist Clean Scrollbar */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(2, 10, 20, 0.8);
-  border-left: 1px solid rgba(0, 240, 255, 0.15);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 240, 255, 0.4);
-  box-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
-  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 240, 255, 0.8);
-  box-shadow: 0 0 15px rgba(0, 240, 255, 0.9);
+  background: rgba(255, 255, 255, 0.22);
 }
 
 @theme inline {
-  --font-heading: var(--font-orbitron), monospace;
-  --font-sans: var(--font-share-tech-mono), var(--font-geist-mono), monospace;
-  --font-mono: var(--font-share-tech-mono), var(--font-geist-mono), monospace;
+  --font-sans: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-heading: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-geist-mono), monospace;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -63,134 +60,90 @@
   --color-background: var(--background);
 }
 
+/* Notion Iconic Dark Theme Palette */
 :root, .dark {
-  --background: #01060f;
-  --foreground: #00f0ff;
-  --card: rgba(3, 16, 32, 0.75);
-  --card-foreground: #a6f4ff;
-  --popover: #031427;
-  --popover-foreground: #00f0ff;
-  --primary: #00f0ff;
-  --primary-foreground: #01060f;
-  --secondary: rgba(0, 240, 255, 0.12);
-  --secondary-foreground: #00f0ff;
-  --muted: rgba(0, 240, 255, 0.08);
-  --muted-foreground: #4e9db5;
-  --accent: rgba(0, 240, 255, 0.18);
+  --background: #191919;
+  --foreground: #e3e2de;
+  --card: #202020;
+  --card-foreground: #e3e2de;
+  --popover: #252525;
+  --popover-foreground: #e3e2de;
+  --primary: #ffffff;
+  --primary-foreground: #191919;
+  --secondary: #262626;
+  --secondary-foreground: #e3e2de;
+  --muted: #222222;
+  --muted-foreground: #8f8e8a;
+  --accent: #2e2e2e;
   --accent-foreground: #ffffff;
-  --destructive: #ff0055;
+  --destructive: #eb5757;
   --destructive-foreground: #ffffff;
-  --border: rgba(0, 240, 255, 0.25);
-  --input: rgba(0, 240, 255, 0.15);
-  --ring: #00f0ff;
-  --radius: 0.25rem;
+  --border: #2e2e2e;
+  --input: #262626;
+  --ring: #3f3f3f;
+  --radius: 0.5rem;
 }
 
-/* Sci-Fi Grid and Scanline Backgrounds */
-.hud-grid-bg {
-  background-color: #01060f;
-  background-image: 
-    linear-gradient(rgba(0, 240, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 240, 255, 0.04) 1px, transparent 1px);
-  background-size: 24px 24px;
+/* Notion Clean Surface Styles */
+.notion-panel {
+  background-color: #202020;
+  border: 1px solid #2e2e2e;
+  border-radius: 0.5rem;
 }
 
-.hud-scanline {
-  background: linear-gradient(
-    to bottom,
-    rgba(255,255,255,0),
-    rgba(255,255,255,0) 50%,
-    rgba(0, 240, 255, 0.03) 50%,
-    rgba(0, 240, 255, 0.03)
-  );
-  background-size: 100% 4px;
+.notion-panel-subtle {
+  background-color: #242424;
+  border: 1px solid #333333;
+  border-radius: 0.375rem;
 }
 
-/* Sci-Fi Glowing Borders and Corner Brackets */
-.hud-panel {
-  position: relative;
-  background: rgba(3, 14, 28, 0.75);
-  border: 1px solid rgba(0, 240, 255, 0.3);
-  box-shadow: inset 0 0 15px rgba(0, 240, 255, 0.05), 0 0 10px rgba(0, 240, 255, 0.08);
-  backdrop-filter: blur(8px);
+.notion-btn {
+  background-color: #252525;
+  border: 1px solid #333333;
+  color: #e3e2de;
+  transition: all 0.15s ease;
 }
 
-.hud-panel::before,
-.hud-panel::after {
-  content: "";
-  position: absolute;
-  width: 8px;
-  height: 8px;
-  pointer-events: none;
-  border-color: #00f0ff;
-  border-style: solid;
+.notion-btn:hover {
+  background-color: #2e2e2e;
+  border-color: #404040;
+  color: #ffffff;
 }
 
-.hud-panel::before {
-  top: -1px;
-  left: -1px;
-  border-width: 2px 0 0 2px;
+.notion-callout {
+  background-color: #222222;
+  border: 1px solid #2e2e2e;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
 }
 
-.hud-panel::after {
-  bottom: -1px;
-  right: -1px;
-  border-width: 0 2px 2px 0;
+/* Clean Minimalist Badges */
+.notion-tag-gray {
+  background-color: rgba(255, 255, 255, 0.07);
+  color: #9b9a97;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.hud-glow-cyan {
-  text-shadow: 0 0 8px rgba(0, 240, 255, 0.8), 0 0 16px rgba(0, 240, 255, 0.4);
+.notion-tag-green {
+  background-color: rgba(46, 125, 50, 0.18);
+  color: #81c784;
+  border: 1px solid rgba(46, 125, 50, 0.28);
 }
 
-.hud-glow-box-cyan {
-  box-shadow: 0 0 12px rgba(0, 240, 255, 0.5), inset 0 0 8px rgba(0, 240, 255, 0.2);
+.notion-tag-amber {
+  background-color: rgba(217, 119, 6, 0.18);
+  color: #fbbf24;
+  border: 1px solid rgba(217, 119, 6, 0.28);
 }
 
-.hud-glow-box-emerald {
-  box-shadow: 0 0 12px rgba(16, 185, 129, 0.6), inset 0 0 8px rgba(16, 185, 129, 0.3);
+.notion-tag-red {
+  background-color: rgba(235, 87, 87, 0.18);
+  color: #f87171;
+  border: 1px solid rgba(235, 87, 87, 0.28);
 }
 
-.hud-glow-box-amber {
-  box-shadow: 0 0 12px rgba(245, 158, 11, 0.6), inset 0 0 8px rgba(245, 158, 11, 0.3);
-}
-
-.hud-glow-box-rose {
-  box-shadow: 0 0 12px rgba(244, 63, 94, 0.6), inset 0 0 8px rgba(244, 63, 94, 0.3);
-}
-
-/* Animations */
-@keyframes radar-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-@keyframes radar-spin-rev {
-  from { transform: rotate(360deg); }
-  to { transform: rotate(0deg); }
-}
-
-@keyframes scan-sweep {
-  0% { transform: translateY(-100%); }
-  100% { transform: translateY(1000%); }
-}
-
-@keyframes waveform-pulse {
-  0%, 100% { height: 20%; }
-  50% { height: 95%; }
-}
-
-.animate-radar {
-  animation: radar-spin 8s linear infinite;
-}
-
-.animate-radar-fast {
-  animation: radar-spin 4s linear infinite;
-}
-
-.animate-radar-rev {
-  animation: radar-spin-rev 12s linear infinite;
-}
-
-.animate-scan-sweep {
-  animation: scan-sweep 3s ease-in-out infinite;
+.notion-tag-blue {
+  background-color: rgba(36, 131, 226, 0.18);
+  color: #60a5fa;
+  border: 1px solid rgba(36, 131, 226, 0.28);
 }

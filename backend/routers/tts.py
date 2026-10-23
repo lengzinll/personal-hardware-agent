@@ -15,6 +15,8 @@ router = APIRouter(prefix="/api/tts", tags=["TTS"])
 DEFAULT_VOICE = "en-US-JennyNeural"
 
 AVAILABLE_VOICES = [
+    {"id": "km-KH-PisethNeural", "name": "Piseth (Natural Khmer Male)", "gender": "Male", "lang": "km-KH"},
+    {"id": "km-KH-SreymomNeural", "name": "Sreymom (Natural Khmer Female)", "gender": "Female", "lang": "km-KH"},
     {"id": "en-US-JennyNeural", "name": "Jenny (Natural US Female)", "gender": "Female", "lang": "en-US"},
     {"id": "en-US-GuyNeural", "name": "Guy (Natural US Male)", "gender": "Male", "lang": "en-US"},
     {"id": "en-US-AriaNeural", "name": "Aria (Expressive US Female)", "gender": "Female", "lang": "en-US"},
@@ -65,19 +67,17 @@ def clean_markdown_for_speech(text: str) -> str:
     clean = re.sub(r'https?://\S+', ' ', clean)
 
     # 2. Format list and preset status lines into natural spoken sentences
-    # e.g., "Stop (Red)" -> "Stop Red"
     clean = re.sub(r'(?i)\bStop\s*\((Red)\)', r'Stop light \1', clean)
     clean = re.sub(r'(?i)\bCaution\s*\((Yellow)\)', r'Caution light \1', clean)
     clean = re.sub(r'(?i)\bGo\s*\((Green)\)', r'Go light \1', clean)
 
-    # Convert status list formats like "Red: OFF" or "Red: ON" into natural sentences
     clean = re.sub(r'(?i)\b(red|yellow|green|lamp)\s*:\s*OFF\b', r'\1 is off.', clean)
     clean = re.sub(r'(?i)\b(red|yellow|green|lamp)\s*:\s*ON\b', r'\1 is on.', clean)
 
-    # 3. Strip all Unicode emojis before TTS processes them as CLDR descriptions (e.g., 'stop sign')
+    # 3. Strip all Unicode emojis
     clean = EMOJI_PATTERN.sub(' ', clean)
 
-    # 4. Remove residual spoken sign artifacts if any remain in text
+    # 4. Remove residual spoken sign artifacts
     clean = re.sub(r'(?i)\b(stop sign|warning sign|caution sign|active sign|high voltage sign|traffic light sign)\b', ' ', clean)
 
     # 5. Remove markdown headers, bold/italic symbols, and punctuation noise
@@ -86,7 +86,11 @@ def clean_markdown_for_speech(text: str) -> str:
     clean = re.sub(r'#+\s*', '', clean)
     clean = re.sub(r'[•\-\[\]\(\)\{\}\<\>\|\~\^\_\\]', ' ', clean)
 
-    # 6. Normalize all-caps words to avoid spelling letter-by-letter
+    # 6. If Khmer script is present, strip stray Chinese/CJK characters hallucinated by LLMs
+    if re.search(r'[ក-៿]', clean):
+        clean = re.sub(r'[一-鿿]', '', clean)
+
+    # 7. Normalize all-caps words to avoid spelling letter-by-letter
     word_replacements = {
         r'\bOFF\b': 'off',
         r'\bON\b': 'on',
@@ -109,6 +113,10 @@ def clean_markdown_for_speech(text: str) -> str:
 
 async def synthesize_audio_bytes(clean_text: str, voice: str, rate: str = "+0%", pitch: str = "+0Hz", max_retries: int = 2) -> bytes:
     """Synthesize speech with retry logic for intermittent DNS/network glitches."""
+    # Auto-switch to Khmer neural voice if text contains Khmer script
+    if re.search(r'[\u1780-\u17FF]', clean_text) and not voice.startswith("km-"):
+        voice = "km-KH-PisethNeural"
+
     last_error = None
     for attempt in range(1, max_retries + 1):
         try:
@@ -158,35 +166,18 @@ async def synthesize_speech_post(req: TTSRequest):
                 "Cache-Control": "no-cache",
             },
         )
-    except Exception as err:
-        logger.error(f"[TTS Server Error]: {err}")
-        raise HTTPException(status_code=502, detail=f"TTS synthesis failed: {str(err)}")
+    except Exception as e:
+        logger.error(f"TTS synthesis error: {e}")
+        raise HTTPException(status_code=500, detail=f"TTS synthesis failed: {str(e)}")
 
 
 @router.get("")
 async def synthesize_speech_get(
     text: str = Query(..., description="Text to speak"),
-    voice: Optional[str] = Query(DEFAULT_VOICE, description="Voice ID"),
-    rate: Optional[str] = Query("+0%", description="Speaking rate, e.g. +10%"),
+    voice: Optional[str] = Query(DEFAULT_VOICE, description="Edge TTS voice name"),
+    rate: Optional[str] = Query("+0%", description="Speech rate"),
+    pitch: Optional[str] = Query("+0Hz", description="Speech pitch"),
 ):
-    """Synthesize text to MP3 audio stream via GET for direct audio elements."""
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="Text cannot be empty")
-
-    clean_text = clean_markdown_for_speech(text)
-    if not clean_text:
-        raise HTTPException(status_code=400, detail="Cleaned text is empty")
-
-    try:
-        audio_data = await synthesize_audio_bytes(clean_text, voice=voice or DEFAULT_VOICE, rate=rate or "+0%")
-        return Response(
-            content=audio_data,
-            media_type="audio/mpeg",
-            headers={
-                "Content-Disposition": "inline; filename=speech.mp3",
-                "Cache-Control": "no-cache",
-            },
-        )
-    except Exception as err:
-        logger.error(f"[TTS Server Error]: {err}")
-        raise HTTPException(status_code=502, detail=f"TTS synthesis failed: {str(err)}")
+    """Synthesize text to MP3 audio stream via GET."""
+    req = TTSRequest(text=text, voice=voice, rate=rate, pitch=pitch)
+    return await synthesize_speech_post(req)

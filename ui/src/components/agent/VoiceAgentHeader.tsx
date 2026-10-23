@@ -1,9 +1,8 @@
 'use client';
 
 import { useAtom } from 'jotai';
-import { Cpu, Zap, MessageSquarePlus, Volume2, VolumeX, Terminal, ShieldAlert } from 'lucide-react';
+import { Volume2, VolumeX, Trash2 } from 'lucide-react';
 import { engineModeAtom, selectedOllamaModelAtom, ttsEnabledAtom } from '@/lib/atoms';
-import { Button } from '@/components/ui/button';
 import { stopTTS } from '@/lib/tts';
 import {
   Select,
@@ -34,74 +33,68 @@ export function VoiceAgentHeader({
   };
 
   return (
-    <div className="px-3 sm:px-4 py-2.5 border-b border-cyan-500/30 bg-cyan-950/40 text-cyan-200 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5 font-mono">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <div className="p-1 rounded-xs bg-cyan-950 border border-cyan-400/40 text-cyan-300">
-            <Terminal className="w-3.5 h-3.5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="font-bold text-cyan-300 text-xs sm:text-sm font-heading tracking-wider hud-glow-cyan">
-                JOHNWICK
-              </h3>
-              <span className="px-1.5 py-0.2 rounded-xs bg-cyan-500/20 border border-cyan-400/40 text-[9px] text-cyan-200 font-bold uppercase tracking-wider flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_6px_#00f0ff]" />
-                {engineMode === 'ollama' ? 'LOCAL_OLLAMA' : 'GEMINI_CLOUD'}
-              </span>
-            </div>
-          </div>
-        </div>
+    <div className="px-3.5 py-2.5 border-b border-[#2e2e2e] bg-[#202020] text-[#e3e2de] flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5">
+      {/* Title & Status Pills */}
+      <div className="flex items-center gap-2">
+        <span className="text-base select-none">💬</span>
+        <h3 className="font-semibold text-sm text-[#ecebed]">
+          Assistant Chat
+        </h3>
+        <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-[#282828] text-[#9b9a97] border border-[#333333]">
+          {engineMode === 'ollama' ? 'Ollama' : 'Gemini'}
+        </span>
+        <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-[#282828] text-[#9b9a97] border border-[#333333]">
+          Browser STT (en-US)
+        </span>
       </div>
 
-      <div className="flex items-center justify-between sm:justify-end gap-1.5 overflow-x-auto pb-0.5 sm:pb-0">
-        {/* Engine Mode Toggle */}
-        <div className="bg-cyan-950/60 p-0.5 rounded-xs border border-cyan-500/30 flex items-center gap-1 shrink-0">
+      {/* Control Actions & Selectors */}
+      <div className="flex items-center justify-between sm:justify-end gap-1.5 overflow-x-auto pb-0.5 sm:pb-0 text-xs">
+        {/* Engine Toggle */}
+        <div className="bg-[#262626] p-0.5 rounded-md border border-[#333333] flex items-center shrink-0">
           <button
             onClick={() => setEngineMode('ollama')}
-            className={`flex items-center gap-1 px-2 py-0.5 rounded-xs text-[10px] font-mono transition-all ${
+            className={`px-2 py-1 rounded-sm text-xs font-medium transition-all ${
               engineMode === 'ollama'
-                ? 'bg-cyan-500 text-slate-950 font-bold shadow-[0_0_8px_rgba(0,240,255,0.7)]'
-                : 'text-cyan-400 hover:text-cyan-200'
+                ? 'bg-[#333333] text-[#ffffff] shadow-sm'
+                : 'text-[#8f8e8a] hover:text-[#ecebed]'
             }`}
           >
-            <Cpu className="w-3 h-3 shrink-0" />
-            <span>OLLAMA</span>
+            Ollama
           </button>
           <button
             onClick={() => setEngineMode('text_flash')}
-            className={`flex items-center gap-1 px-2 py-0.5 rounded-xs text-[10px] font-mono transition-all ${
+            className={`px-2 py-1 rounded-sm text-xs font-medium transition-all ${
               engineMode === 'text_flash'
-                ? 'bg-cyan-500 text-slate-950 font-bold shadow-[0_0_8px_rgba(0,240,255,0.7)]'
-                : 'text-cyan-400 hover:text-cyan-200'
+                ? 'bg-[#333333] text-[#ffffff] shadow-sm'
+                : 'text-[#8f8e8a] hover:text-[#ecebed]'
             }`}
           >
-            <Zap className="w-3 h-3 shrink-0" />
-            <span>GEMINI</span>
+            Gemini
           </button>
         </div>
 
-        {/* Ollama Model Selector dropdown */}
+        {/* Ollama Model Selector */}
         {engineMode === 'ollama' && (
-          <div className="shrink-0 w-36 sm:w-44">
+          <div className="shrink-0 w-36 sm:w-40">
             <Select
               value={selectedOllamaModel}
               onValueChange={(val) => {
                 if (val) setSelectedOllamaModel(val);
               }}
             >
-              <SelectTrigger className="h-6.5 text-[10px] bg-cyan-950/70 border-cyan-500/40 text-cyan-200 font-mono rounded-xs">
-                <SelectValue placeholder="MODEL..." />
+              <SelectTrigger className="h-7 text-xs bg-[#262626] border-[#333333] text-[#ecebed] rounded-md font-sans focus:ring-0">
+                <SelectValue placeholder="Model..." />
               </SelectTrigger>
-              <SelectContent className="bg-slate-950 border-cyan-500/50 text-cyan-200 font-mono">
+              <SelectContent className="bg-[#252525] border-[#333333] text-[#ecebed]">
                 {ollamaModels.length > 0 ? (
                   ollamaModels.map((model) => (
-                    <SelectItem key={model} value={model} className="text-[11px] focus:bg-cyan-500/20 focus:text-cyan-100">
+                    <SelectItem key={model} value={model} className="text-xs focus:bg-[#333333]">
                       {model}
                     </SelectItem>
                   ))
                 ) : (
-                  <SelectItem value="ornith-1.5:9b" className="text-[11px]">
+                  <SelectItem value="ornith-1.5:9b" className="text-xs">
                     ornith-1.5:9b
                   </SelectItem>
                 )}
@@ -110,36 +103,36 @@ export function VoiceAgentHeader({
           </div>
         )}
 
-        {/* TTS Voice Output Toggle */}
+        {/* TTS Toggle */}
         <button
           onClick={toggleTts}
-          className={`h-6.5 px-2 rounded-xs border text-[10px] font-mono flex items-center gap-1 transition-all shrink-0 ${
+          className={`h-7 px-2.5 rounded-md border text-xs flex items-center gap-1.5 transition-all shrink-0 ${
             ttsEnabled
-              ? 'bg-cyan-500/20 text-cyan-200 border-cyan-400 shadow-[0_0_8px_rgba(0,240,255,0.4)]'
-              : 'bg-cyan-950/40 text-cyan-600 border-cyan-800/50 hover:text-cyan-400'
+              ? 'bg-[#2a2a2a] text-[#ecebed] border-[#3d3d3d]'
+              : 'bg-[#222222] text-[#666666] border-[#2e2e2e] hover:text-[#999999]'
           }`}
+          title={ttsEnabled ? 'Mute Speech' : 'Enable Speech'}
         >
           {ttsEnabled ? (
             <>
-              <Volume2 className="w-3 h-3 text-cyan-300 animate-pulse" />
-              <span>SYNTH_VOICE: ON</span>
+              <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Voice</span>
             </>
           ) : (
             <>
-              <VolumeX className="w-3 h-3" />
-              <span>SYNTH_VOICE: MUTED</span>
+              <VolumeX className="w-3.5 h-3.5" />
+              <span>Muted</span>
             </>
           )}
         </button>
 
-        {/* Clear History Button */}
+        {/* Clear Chat Button */}
         <button
           onClick={clearChatHistory}
-          className="h-6.5 px-2 rounded-xs border border-cyan-500/30 bg-cyan-950/40 text-cyan-400 hover:text-cyan-100 hover:border-cyan-400 flex items-center justify-center transition-all shrink-0"
-          title="PURGE CONVERSATION LOGS"
+          className="h-7 w-7 rounded-md border border-[#333333] bg-[#262626] text-[#8f8e8a] hover:text-[#ecebed] hover:bg-[#2e2e2e] flex items-center justify-center transition-all shrink-0"
+          title="Clear Conversation"
         >
-          <MessageSquarePlus className="w-3.5 h-3.5 mr-1" />
-          <span className="text-[10px]">PURGE</span>
+          <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
     </div>

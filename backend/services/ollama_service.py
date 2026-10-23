@@ -52,7 +52,8 @@ Instructions:
 - If user wants to turn on/off all lights, call control_led(color='all', state=...).
 - If user wants traffic preset, call set_traffic_preset.
 - If user asks for status of lights or lamp, call get_led_status.
-- Keep responses short, direct, and conversational."""
+- Keep responses short, direct, and conversational.
+- LANGUAGE DIRECTIVE: If the user speaks or commands in Khmer (ភាសាខ្មែរ) or input contains Khmer characters, you MUST reply in natural, polite Khmer (ភាសាខ្មែរ) so the Khmer neural voice reads it in Khmer. If addressed in English, reply in English."""
 
 OLLAMA_TOOLS = [
     {
